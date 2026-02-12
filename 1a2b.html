@@ -11,7 +11,6 @@
             --primary-hover: #c2255c;
             --gradient-start: #d6336c;
             --gradient-end: #7048e8;
-            /* 新增漸層尾端顏色 */
             --text-color: #343a40;
             --text-secondary: #868e96;
             --border-color: #dee2e6;
@@ -32,10 +31,8 @@
             padding: 40px 20px;
             box-sizing: border-box;
             position: relative;
-            /* 為了定位返回按鈕 */
         }
 
-        /* 2. 新增：返回按鈕樣式 */
         .back-btn {
             position: absolute;
             top: 20px;
@@ -64,17 +61,13 @@
             max-width: 480px;
             text-align: center;
             margin-top: 20px;
-            /* 避免被返回按鈕擋住 */
         }
 
         h1 {
             margin-top: 0;
             font-size: 2.5rem;
-            /* 稍微加大 */
             margin-bottom: 0.5rem;
             letter-spacing: 1px;
-
-            /* 1. 修改：漸層文字特效 */
             background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
             -webkit-background-clip: text;
             background-clip: text;
@@ -85,7 +78,7 @@
         .stats {
             font-size: 1rem;
             color: var(--text-secondary);
-            margin-bottom: 2.5rem;
+            margin-bottom: 1rem;
             font-weight: 500;
         }
 
@@ -96,19 +89,47 @@
             margin-left: 5px;
         }
 
-        /* 輸入框容器 */
+        /* --- 新增：當次結果顯示區 --- */
+        .current-result-display {
+            font-size: 3rem;
+            font-weight: 900;
+            height: 60px;
+            /* 固定高度避免版面跳動 */
+            margin-bottom: 0.5rem;
+            color: var(--gradient-end);
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .current-result-display.show {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .current-result-display.win {
+            color: var(--success-color);
+        }
+
         .inputs-wrapper {
             display: flex;
             justify-content: center;
-            gap: 12px;
+            gap: 10px;
+            /* 間距稍微縮小 */
             margin-bottom: 2rem;
         }
 
-        /* 獨立輸入框優化 */
+        /* --- 修改：輸入框縮小 --- */
         .digit-input {
-            width: 65px;
-            height: 75px;
-            font-size: 2.5rem;
+            width: 55px;
+            /* 原本 65px -> 改為 55px */
+            height: 65px;
+            /* 原本 75px -> 改為 65px */
+            font-size: 2.2rem;
+            /* 字體稍微縮小適配 */
             text-align: center;
             border: 2px solid var(--border-color);
             border-radius: 12px;
@@ -168,14 +189,15 @@
         }
 
         .message {
-            margin-bottom: 1.5rem;
+            margin-bottom: 1rem;
             min-height: 24px;
             font-weight: bold;
             color: var(--error-color);
+            font-size: 0.9rem;
         }
 
         .history-container {
-            margin-top: 3rem;
+            margin-top: 2rem;
         }
 
         .history-header {
@@ -188,10 +210,7 @@
             font-weight: bold;
         }
 
-        /* 3. 修改：移除高度限制，讓它無限延伸 */
         .history-list {
-            /* max-height: 300px;  <-- 已移除 */
-            /* overflow-y: auto;   <-- 已移除 */
             width: 100%;
         }
 
@@ -235,13 +254,16 @@
         }
 
         @media (max-width: 480px) {
+
+            /* --- 手機版同步縮小 --- */
             .digit-input {
-                width: 60px;
-                height: 70px;
-                font-size: 2rem;
+                width: 45px;
+                /* 原本 60px -> 改為 45px */
+                height: 55px;
+                /* 原本 70px -> 改為 55px */
+                font-size: 1.8rem;
             }
 
-            /* 手機版調整返回按鈕位置，避免貼太近 */
             .back-btn {
                 top: 10px;
                 left: 10px;
@@ -267,6 +289,8 @@
         <div class="stats">
             目前嘗試次數: <span id="guessCount">0</span>
         </div>
+
+        <div id="currentResult" class="current-result-display"></div>
 
         <div class="message" id="msgBox"></div>
 
@@ -300,6 +324,8 @@
         const msgBox = document.getElementById('msgBox');
         const historyList = document.getElementById('historyList');
         const guessCountSpan = document.getElementById('guessCount');
+        // 新增 DOM 選擇
+        const currentResultDiv = document.getElementById('currentResult');
 
         function initGame() {
             answer = generateAnswer();
@@ -318,6 +344,10 @@
             msgBox.textContent = "";
             historyList.innerHTML = "";
 
+            // 重置顯示區
+            currentResultDiv.textContent = "";
+            currentResultDiv.classList.remove('show', 'win');
+
             console.log("謎底: " + answer);
             inputs[0].focus();
         }
@@ -331,23 +361,17 @@
             return nums.slice(0, 4).join('');
         }
 
-        // ------------------------------------------
         // 核心邏輯：鍵盤自動跳格處理
-        // ------------------------------------------
         inputs.forEach((input, index) => {
-
             input.addEventListener('input', (e) => {
                 const val = input.value;
-
                 if (!/^\d*$/.test(val)) {
                     input.value = "";
                     return;
                 }
-
                 if (val.length > 1) {
                     input.value = val.slice(-1);
                 }
-
                 if (input.value !== "" && index < 3) {
                     inputs[index + 1].focus();
                 }
@@ -359,7 +383,6 @@
                         inputs[index - 1].focus();
                     }
                 }
-
                 if (e.key === 'Enter') {
                     handleGuess();
                 }
@@ -369,6 +392,7 @@
                 input.select();
             });
 
+            // 貼上功能支援
             input.addEventListener('paste', (e) => {
                 e.preventDefault();
                 const pasteData = (e.clipboardData || window.clipboardData).getData('text');
@@ -424,6 +448,16 @@
             msgBox.textContent = "";
 
             const result = checkAB(val, answer);
+
+            // --- 更新當次結果顯示 ---
+            currentResultDiv.textContent = result;
+            currentResultDiv.classList.add('show');
+            if (result === "4A0B") {
+                currentResultDiv.classList.add('win');
+            } else {
+                currentResultDiv.classList.remove('win');
+            }
+
             addHistory(val, result);
 
             if (result !== "4A0B") {
@@ -444,7 +478,6 @@
             <span class="guess-val">${guess}</span>
             <span class="${resultClass}">${result}</span>
         `;
-            // 改回 prepend (最新的在最上面)，列表會自然往下推
             historyList.prepend(item);
         }
 
