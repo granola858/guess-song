@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Song Search Vibe | 歌曲資料庫</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+
+        // --- Icons ---
+        const UploadIcon = () => (
+            <svg className="w-6 h-6 mb-2 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+        );
+        const CheckIcon = () => (
+            <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+        );
+        const SearchIcon = () => (
+            <svg className="w-5 h-5 text-gray-400 absolute left-4 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        );
+        const RefreshIcon = () => (
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        );
+        const SpinnerIcon = () => (
+            <svg className="animate-spin h-5 w-5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        );
+
+        // --- Skeleton ---
+        const SkeletonCard = () => (
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 animate-pulse">
+                <div className="flex justify-between items-start mb-2">
+                    <div className="h-4 w-10 bg-slate-200 rounded-full"></div>
+                    <div className="h-3 w-8 bg-slate-200 rounded"></div>
+                </div>
+                <div className="h-5 w-20 bg-slate-200 rounded mb-2"></div>
+                <div className="h-5 w-3/4 bg-slate-200 rounded mb-3"></div>
+                <div className="pt-2 border-t border-slate-50">
+                    <div className="h-3 w-16 bg-slate-200 rounded mb-1"></div>
+                    <div className="h-3 w-full bg-slate-200 rounded"></div>
+                </div>
+            </div>
+        );
+
+        // --- Main App ---
+        function App() {
+            const [songs, setSongs] = useState([]);
+            const [query, setQuery] = useState("");
+            const [fileName, setFileName] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+
+            const processData = (data) => {
+                 return data.map(row => {
+                    const keys = Object.keys(row);
+                    const values = Object.values(row);
+
+                    const findVal = (keywords) => {
+                        const foundKey = keys.find(k => keywords.some(keyword => k.toLowerCase().includes(keyword)));
+                        return foundKey ? row[foundKey] : null;
+                    };
+
+                    let id = findVal(["編號", "id", "no", "code", "序號"]);
+                    let source = findVal(["電影", "劇", "source", "movie", "film", "origin", "出處", "作品"]); 
+                    let title = findVal(["歌名", "title", "name", "song", "曲目", "歌曲", "名稱"]);
+                    let year = findVal(["年份", "year", "date", "日期", "發行"]);
+                    let director = findVal(["導演", "director", "directed", "filmmaker", "監製"]);
+                    let cast = findVal(["演員", "cast", "配音", "artist", "singer", "演唱", "歌手", "備註"]);
+
+                    if (!id && !title && values.length >= 2) {
+                        id = values[0];
+                        title = values[1];
+                    }
+
+                    return {
+                        id: id || "N/A",
+                        source: source || "-",
+                        title: title || "未命名",
+                        year: year || "-",
+                        director: director || "-",
+                        cast: cast || "-"
+                    };
+                });
+            };
+
+            const loadDemoData = () => {
+                setLoading(true);
+                setFileName("Demo_Data.xlsx");
+                setTimeout(() => {
+                    setSongs([
+                        { id: "001", source: "Frozen", title: "Let It Go", year: 2013, director: "Jennifer Lee", cast: "Idina Menzel" },
+                        { id: "002", source: "Aladdin", title: "A Whole New World", year: 1992, director: "Ron Clements", cast: "Brad Kane" },
+                        { id: "003", source: "Coco", title: "Remember Me", year: 2017, director: "Lee Unkrich", cast: "Benjamin Bratt" },
+                        { id: "004", source: "The Little Mermaid", title: "Part of Your World", year: 1989, director: "John Musker", cast: "Jodi Benson" },
+                        { id: "005", source: "Inception", title: "Time", year: 2010, director: "Christopher Nolan", cast: "Hans Zimmer" },
+                    ]);
+                    setLoading(false);
+                }, 800);
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                setLoading(true);
+                setFileName(file.name);
+                setError(null);
+                setSongs([]);
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const wsname = wb.SheetNames[0];
+                        const data = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
+                        
+                        const normalizedData = processData(data);
+
+                        setTimeout(() => {
+                            setSongs(normalizedData);
+                            setLoading(false);
+                        }, 800);
+
+                    } catch (err) {
+                        setError("檔案解析失敗，請確認格式。");
+                        setLoading(false);
+                        console.error(err);
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+
+            const filteredSongs = useMemo(() => {
+                if (!query) return songs;
+                const lowerQ = query.toLowerCase();
+                return songs.filter(s => 
+                    String(s.title).toLowerCase().includes(lowerQ) || 
+                    String(s.id).toLowerCase().includes(lowerQ) ||
+                    String(s.source).toLowerCase().includes(lowerQ) ||
+                    String(s.director).toLowerCase().includes(lowerQ)
+                );
+            }, [query, songs]);
+
+            return (
+                <div className="min-h-screen pb-8">
+                    <header className="bg-indigo-600 text-white pb-12 pt-8 px-4 shadow-lg">
+                        <div className="max-w-4xl mx-auto text-center">
+                            <h1 className="text-2xl font-bold tracking-tight mb-1">歌曲資料庫檢索</h1>
+                            <p className="text-indigo-100 opacity-80 text-sm">RWD 極速查詢系統</p>
+                        </div>
+                    </header>
+
+                    <div className="max-w-4xl mx-auto px-4 -mt-8">
+                        <div className="glass-panel rounded-2xl shadow-xl p-5 mb-6 relative overflow-hidden">
+                            
+                            {loading && (
+                                <div className="absolute inset-0 bg-white/80 z-20 flex items-center justify-center backdrop-blur-sm transition-all">
+                                    <div className="flex items-center gap-3 bg-white px-5 py-2 rounded-full shadow-lg border border-indigo-100">
+                                        <SpinnerIcon />
+                                        <span className="text-indigo-700 font-semibold text-sm">處理中...</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="mb-5">
+                                {!fileName ? (
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <label className="flex-1 flex flex-col items-center justify-center px-4 py-4 bg-white rounded-xl shadow-sm border-2 border-dashed border-indigo-200 cursor-pointer hover:bg-indigo-50 hover:border-indigo-400 transition-all group">
+                                            <div className="flex items-center gap-2">
+                                                <UploadIcon />
+                                                <span className="text-sm font-semibold text-slate-600 group-hover:text-indigo-600">
+                                                    點擊上傳 Excel 檔案
+                                                </span>
+                                            </div>
+                                            <input type='file' className="hidden" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} disabled={loading} />
+                                        </label>
+                                        <button onClick={loadDemoData} disabled={loading} className="px-4 py-2 rounded-xl text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                                            試用範例
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 animate-fade-in">
+                                        <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+                                            <div className="bg-white p-1 rounded-full shadow-sm">
+                                                <CheckIcon />
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-indigo-500 font-semibold uppercase tracking-wider">已就緒</span>
+                                                <span className="text-sm font-bold text-slate-700 truncate max-w-[200px] sm:max-w-md">
+                                                    {fileName}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <label className="flex items-center justify-center gap-2 px-5 py-3 bg-white text-slate-600 border border-slate-200 rounded-xl font-medium text-sm hover:bg-slate-50 hover:border-slate-300 hover:text-slate-800 transition-all cursor-pointer shadow-sm active:scale-95">
+                                            <RefreshIcon />
+                                            上傳其他檔案
+                                            <input type='file' className="hidden" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} disabled={loading} />
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="relative w-full">
+                                <SearchIcon />
+                                <input 
+                                    type="text" 
+                                    placeholder="輸入歌名、電影、導演或編號搜尋..." 
+                                    className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-inner text-base"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    disabled={loading}
+                                />
+                            </div>
+                            
+                            {error && <div className="mt-3 text-red-500 text-sm font-medium text-center">{error}</div>}
+                        </div>
+
+                        <div className="flex justify-between items-end mb-3 px-1">
+                            <h2 className="text-base font-bold text-slate-700">搜尋結果</h2>
+                            <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-md">
+                                {loading ? "..." : `${filteredSongs.length} 筆`}
+                            </span>
+                        </div>
+
+                        {loading ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                {[...Array(6)].map((_, i) => <SkeletonCard key={i} />)}
+                            </div>
+                        ) : filteredSongs.length === 0 ? (
+                            <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-gray-300">
+                                <p className="text-gray-400 text-sm">
+                                    {songs.length === 0 ? "尚未匯入資料" : "找不到符合的歌曲"}
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                {filteredSongs.map((song, idx) => (
+                                    <div key={idx} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 group flex flex-col">
+                                        
+                                        {/* ID & Year (Year 樣式已調整) */}
+                                        <div className="flex justify-between items-start mb-1.5">
+                                            <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
+                                                #{song.id}
+                                            </span>
+                                            {/* [修改] 年份樣式調整為與下方演員一致 (text-xs text-slate-600) */}
+                                            <span className="text-xs text-slate-600">{song.year}</span>
+                                        </div>
+
+                                        {/* Source */}
+                                        <div className="text-indigo-600 text-base font-bold tracking-wide mb-0.5 leading-tight">
+                                            {song.source}
+                                        </div>
+
+                                        {/* Title */}
+                                        <h3 className="text-sm font-medium text-slate-700 mb-auto group-hover:text-slate-900 transition-colors">
+                                            {song.title}
+                                        </h3>
+
+                                        {/* Credits Section */}
+                                        <div className="mt-3 pt-2 border-t border-slate-50 space-y-2">
+                                            
+                                            {/* Director */}
+                                            {song.director !== "-" && (
+                                                <div className="flex flex-col">
+                                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-0.5">導演</p>
+                                                    <p className="text-xs text-slate-700 font-medium">{song.director}</p>
+                                                </div>
+                                            )}
+
+                                            {/* Cast (參考樣式目標) */}
+                                            <div className="flex flex-col">
+                                                 <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-0.5">主要演員 / 配音</p>
+                                                 <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{song.cast}</p>
+                                            </div>
+
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
