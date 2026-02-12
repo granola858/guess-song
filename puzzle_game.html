@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>聯想小遊戲</title>
+    <title>聯想遊戲</title>
     <style>
         :root {
             --primary-color: #FF9F1C;
+            --primary-gradient-start: #FF9F1C;
+            --primary-gradient-end: #FF355E;
             --secondary-color: #2EC4B6;
             --bg-color: #F5F7FA;
             --text-color: #333;
@@ -16,7 +19,8 @@
         }
 
         body {
-            font-family: "jf-openhuninn", "微軟正黑體", sans-serif;
+            /* 修改 1: 將字體改為與 1A2B/Math 頁面一致的系統字體，解決粗細問題 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             display: flex;
@@ -27,13 +31,55 @@
             margin: 0;
             padding: 20px;
             box-sizing: border-box;
+            position: relative;
+        }
+
+        /* 如果你希望遊戲顯示的文字(卡片內)還是保持可愛風格，可以單獨設定這裡 */
+        /* 若不需要，可以刪除這段 */
+        .result-text,
+        .card h3 {
+            font-family: "jf-openhuninn", "微軟正黑體", sans-serif;
+        }
+
+        /* 返回按鈕樣式 */
+        .back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            text-decoration: none;
+            color: var(--inactive-btn-text);
+            font-weight: 600;
+            /* 現在這個 600 會跟其他頁面看起來一樣了 */
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            background-color: #fff;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            z-index: 10;
+        }
+
+        .back-btn:hover {
+            color: var(--primary-color);
+            background-color: #fff0e6;
+            transform: translateX(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
         h1 {
-            color: var(--primary-color);
             margin-bottom: 20px;
-            font-weight: bold;
+            font-weight: 900;
+            /* 修改 2: 加強粗度，現在字體支援了所以會生效 */
             letter-spacing: 1px;
+            font-size: 2.5rem;
+
+            background: linear-gradient(135deg, var(--primary-gradient-start), var(--primary-gradient-end));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
 
         /* 切換按鈕區塊 */
@@ -43,7 +89,7 @@
             padding: 5px;
             border-radius: 50px;
             margin-bottom: 25px;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .mode-btn {
@@ -61,7 +107,7 @@
         .mode-btn.active {
             background-color: #fff;
             color: var(--primary-color);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         }
 
         .game-container {
@@ -81,16 +127,20 @@
         .card {
             background: #fff;
             border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
             padding: 25px 20px;
             flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
-            /* 修改：靠上對齊 */
-            justify-content: flex-start; 
+            justify-content: flex-start;
             min-height: 160px;
             border: 1px solid #f0f0f0;
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
         }
 
         .card h3 {
@@ -106,7 +156,7 @@
             line-height: 1.2;
             color: var(--text-color);
         }
-        
+
         .result-category {
             font-size: 2rem;
             color: var(--secondary-color);
@@ -133,14 +183,30 @@
             transform: scale(0.98);
         }
 
-        /* 骰子動畫：搖晃效果 */
         @keyframes shake {
-            0% { transform: rotate(0deg); }
-            20% { transform: rotate(-3deg); }
-            40% { transform: rotate(3deg); }
-            60% { transform: rotate(-3deg); }
-            80% { transform: rotate(3deg); }
-            100% { transform: rotate(0deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            20% {
+                transform: rotate(-3deg);
+            }
+
+            40% {
+                transform: rotate(3deg);
+            }
+
+            60% {
+                transform: rotate(-3deg);
+            }
+
+            80% {
+                transform: rotate(3deg);
+            }
+
+            100% {
+                transform: rotate(0deg);
+            }
         }
 
         .btn-animating {
@@ -170,17 +236,35 @@
             font-size: 0.9rem;
             transition: all 0.2s;
         }
-        
+
         .hint-btn:hover {
             border-color: var(--secondary-color);
             color: var(--secondary-color);
+            background-color: #f0fffd;
         }
 
+        @media (max-width: 480px) {
+            .back-btn {
+                top: 10px;
+                left: 10px;
+                padding: 6px 10px;
+                font-size: 0.85rem;
+            }
+        }
     </style>
 </head>
+
 <body>
 
-    <h1>聯想小遊戲</h1>
+    <a href="index.html" class="back-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+        回首頁
+    </a>
+
+    <h1>聯想遊戲</h1>
 
     <div class="toggle-container">
         <button id="btn-zh" class="mode-btn active" onclick="setMode('zh')">注音</button>
@@ -207,12 +291,12 @@
     </div>
 
     <script>
-        const zhuyin = ["ㄅ","ㄆ","ㄇ","ㄈ","ㄉ","ㄊ","ㄋ","ㄌ","ㄍ","ㄎ","ㄏ","ㄐ","ㄑ","ㄒ","ㄓ","ㄔ","ㄕ","ㄖ","ㄗ","ㄘ","ㄙ","ㄧ","ㄨ","ㄩ","ㄚ","ㄛ","ㄜ","ㄝ","ㄞ","ㄟ","ㄠ","ㄡ","ㄢ","ㄣ","ㄤ","ㄥ","ㄦ"];
+        const zhuyin = ["ㄅ", "ㄆ", "ㄇ", "ㄈ", "ㄉ", "ㄊ", "ㄋ", "ㄌ", "ㄍ", "ㄎ", "ㄏ", "ㄐ", "ㄑ", "ㄒ", "ㄓ", "ㄔ", "ㄕ", "ㄖ", "ㄗ", "ㄘ", "ㄙ", "ㄧ", "ㄨ", "ㄩ", "ㄚ", "ㄛ", "ㄜ", "ㄝ", "ㄞ", "ㄟ", "ㄠ", "ㄡ", "ㄢ", "ㄣ", "ㄤ", "ㄥ", "ㄦ"];
         const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
         const categories = [
-            "動物", "食物", "水果", "交通工具", 
-            "地點", "身體部位", "生活用品", "職業", 
+            "動物", "食物", "水果", "交通工具",
+            "地點", "身體部位", "生活用品", "職業",
             "卡通人物", "動作", "形容詞"
         ];
 
@@ -223,11 +307,8 @@
 
         function setMode(mode) {
             currentMode = mode;
-            // 更新按鈕樣式
             document.getElementById('btn-zh').className = mode === 'zh' ? 'mode-btn active' : 'mode-btn';
             document.getElementById('btn-en').className = mode === 'en' ? 'mode-btn active' : 'mode-btn';
-            
-            // 切換模式時重置顯示
             document.getElementById('symbolDisplay').innerText = "-";
             document.getElementById('categoryDisplay').innerText = "-";
             document.getElementById('hintSection').classList.remove('visible');
@@ -236,71 +317,53 @@
         function startRoll() {
             if (isRolling) return;
             isRolling = true;
-
             const rollBtn = document.getElementById('rollBtn');
             const symbolDisplay = document.getElementById('symbolDisplay');
             const categoryDisplay = document.getElementById('categoryDisplay');
             const hintSec = document.getElementById('hintSection');
-
-            // 1. 隱藏提示
             hintSec.classList.remove('visible');
-
-            // 2. 按鈕動態 (Shake)
             rollBtn.classList.add('btn-animating');
 
-            // 3. 文字跳動特效 (Rolling effect)
             let counter = 0;
             const sourceArray = currentMode === 'en' ? alphabet : zhuyin;
-            
+
             const interval = setInterval(() => {
-                // 隨機閃爍文字
                 symbolDisplay.innerText = sourceArray[Math.floor(Math.random() * sourceArray.length)];
                 categoryDisplay.innerText = categories[Math.floor(Math.random() * categories.length)];
-                
                 counter++;
-                // 跑個 10 次 (約 0.5 秒) 後停下
                 if (counter > 10) {
                     clearInterval(interval);
                     finalizeResult(sourceArray);
                 }
-            }, 50); // 每 50ms 跳一次
+            }, 50);
         }
 
         function finalizeResult(sourceArray) {
             const rollBtn = document.getElementById('rollBtn');
-            
-            // 產生最終結果
             currentSymbol = sourceArray[Math.floor(Math.random() * sourceArray.length)];
             currentCategory = categories[Math.floor(Math.random() * categories.length)];
-
             document.getElementById('symbolDisplay').innerText = currentSymbol;
             document.getElementById('categoryDisplay').innerText = currentCategory;
-
-            // 調整字體大小
             const catEl = document.getElementById('categoryDisplay');
             catEl.style.fontSize = currentCategory.length > 3 ? "1.5rem" : "2rem";
-
-            // 移除按鈕動畫
             rollBtn.classList.remove('btn-animating');
             isRolling = false;
-
-            // 顯示提示按鈕
             setTimeout(() => {
                 document.getElementById('hintSection').classList.add('visible');
             }, 300);
         }
 
         function openHint() {
-            if(!currentSymbol || !currentCategory) return;
+            if (!currentSymbol || !currentCategory) return;
             let query = "";
-            
             if (currentMode === 'en') {
-                 query = `${currentCategory} starts with ${currentSymbol}`;
+                query = `${currentCategory} starts with ${currentSymbol}`;
             } else {
-                 query = `${currentSymbol}開頭的${currentCategory}`;
+                query = `${currentSymbol}開頭的${currentCategory}`;
             }
             window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
         }
     </script>
 </body>
+
 </html>

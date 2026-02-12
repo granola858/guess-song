@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1A2B 猜數字遊戲</title>
+    <style>
+        :root {
+            --primary-color: #d6336c;
+            --primary-hover: #c2255c;
+            --gradient-start: #d6336c;
+            --gradient-end: #7048e8;
+            /* 新增漸層尾端顏色 */
+            --text-color: #343a40;
+            --text-secondary: #868e96;
+            --border-color: #dee2e6;
+            --success-color: #20c997;
+            --error-color: #fa5252;
+            --focus-glow: rgba(214, 51, 108, 0.25);
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #ffffff;
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding: 40px 20px;
+            box-sizing: border-box;
+            position: relative;
+            /* 為了定位返回按鈕 */
+        }
+
+        /* 2. 新增：返回按鈕樣式 */
+        .back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            background-color: #f8f9fa;
+        }
+
+        .back-btn:hover {
+            color: var(--primary-color);
+            background-color: #fff0f6;
+            transform: translateX(-3px);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            text-align: center;
+            margin-top: 20px;
+            /* 避免被返回按鈕擋住 */
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 2.5rem;
+            /* 稍微加大 */
+            margin-bottom: 0.5rem;
+            letter-spacing: 1px;
+
+            /* 1. 修改：漸層文字特效 */
+            background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-weight: 800;
+        }
+
+        .stats {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2.5rem;
+            font-weight: 500;
+        }
+
+        .stats span {
+            color: var(--primary-color);
+            font-weight: bold;
+            font-size: 1.3rem;
+            margin-left: 5px;
+        }
+
+        /* 輸入框容器 */
+        .inputs-wrapper {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 2rem;
+        }
+
+        /* 獨立輸入框優化 */
+        .digit-input {
+            width: 65px;
+            height: 75px;
+            font-size: 2.5rem;
+            text-align: center;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            outline: none;
+            background-color: #fff;
+            color: var(--text-color);
+            font-weight: bold;
+            transition: all 0.15s ease-out;
+            caret-color: transparent;
+            cursor: pointer;
+        }
+
+        .digit-input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 5px var(--focus-glow);
+            transform: translateY(-2px);
+        }
+
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: white;
+            background-color: var(--primary-color);
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            margin-bottom: 1rem;
+            letter-spacing: 1px;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background-color: #adb5bd;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #restartBtn {
+            background-color: #495057;
+            display: none;
+        }
+
+        .message {
+            margin-bottom: 1.5rem;
+            min-height: 24px;
+            font-weight: bold;
+            color: var(--error-color);
+        }
+
+        .history-container {
+            margin-top: 3rem;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            padding: 0 10px 10px 10px;
+            border-bottom: 2px solid #f1f3f5;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+
+        /* 3. 修改：移除高度限制，讓它無限延伸 */
+        .history-list {
+            /* max-height: 300px;  <-- 已移除 */
+            /* overflow-y: auto;   <-- 已移除 */
+            width: 100%;
+        }
+
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 10px;
+            border-bottom: 1px solid #f8f9fa;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        .guess-val {
+            font-size: 1.3rem;
+            font-family: monospace;
+            font-weight: bold;
+            letter-spacing: 6px;
+            color: var(--text-color);
+        }
+
+        .result-text {
+            font-weight: 800;
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+        }
+
+        .result-success {
+            color: var(--success-color);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .digit-input {
+                width: 60px;
+                height: 70px;
+                font-size: 2rem;
+            }
+
+            /* 手機版調整返回按鈕位置，避免貼太近 */
+            .back-btn {
+                top: 10px;
+                left: 10px;
+                padding: 6px 10px;
+                font-size: 0.85rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <a href="index.html" class="back-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+        回首頁
+    </a>
+
+    <div class="container">
+        <h1>1A2B 猜數字</h1>
+        <div class="stats">
+            目前嘗試次數: <span id="guessCount">0</span>
+        </div>
+
+        <div class="message" id="msgBox"></div>
+
+        <div class="inputs-wrapper" id="inputContainer">
+            <input type="text" class="digit-input" maxlength="1" inputmode="numeric">
+            <input type="text" class="digit-input" maxlength="1" inputmode="numeric">
+            <input type="text" class="digit-input" maxlength="1" inputmode="numeric">
+            <input type="text" class="digit-input" maxlength="1" inputmode="numeric">
+        </div>
+
+        <button id="submitBtn">確認猜測</button>
+        <button id="restartBtn">再來一局</button>
+
+        <div class="history-container">
+            <div class="history-header">
+                <span>猜測號碼</span>
+                <span>結果</span>
+            </div>
+            <div class="history-list" id="historyList"></div>
+        </div>
+    </div>
+
+    <script>
+        let answer = "";
+        let isGameOver = false;
+        let count = 0;
+
+        const inputs = document.querySelectorAll('.digit-input');
+        const submitBtn = document.getElementById('submitBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const msgBox = document.getElementById('msgBox');
+        const historyList = document.getElementById('historyList');
+        const guessCountSpan = document.getElementById('guessCount');
+
+        function initGame() {
+            answer = generateAnswer();
+            isGameOver = false;
+            count = 0;
+            guessCountSpan.textContent = count;
+
+            inputs.forEach(input => {
+                input.value = "";
+                input.disabled = false;
+                input.style.borderColor = "var(--border-color)";
+            });
+
+            submitBtn.disabled = false;
+            restartBtn.style.display = "none";
+            msgBox.textContent = "";
+            historyList.innerHTML = "";
+
+            console.log("謎底: " + answer);
+            inputs[0].focus();
+        }
+
+        function generateAnswer() {
+            const nums = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+            for (let i = nums.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [nums[i], nums[j]] = [nums[j], nums[i]];
+            }
+            return nums.slice(0, 4).join('');
+        }
+
+        // ------------------------------------------
+        // 核心邏輯：鍵盤自動跳格處理
+        // ------------------------------------------
+        inputs.forEach((input, index) => {
+
+            input.addEventListener('input', (e) => {
+                const val = input.value;
+
+                if (!/^\d*$/.test(val)) {
+                    input.value = "";
+                    return;
+                }
+
+                if (val.length > 1) {
+                    input.value = val.slice(-1);
+                }
+
+                if (input.value !== "" && index < 3) {
+                    inputs[index + 1].focus();
+                }
+            });
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Backspace') {
+                    if (input.value === "" && index > 0) {
+                        inputs[index - 1].focus();
+                    }
+                }
+
+                if (e.key === 'Enter') {
+                    handleGuess();
+                }
+            });
+
+            input.addEventListener('focus', () => {
+                input.select();
+            });
+
+            input.addEventListener('paste', (e) => {
+                e.preventDefault();
+                const pasteData = (e.clipboardData || window.clipboardData).getData('text');
+                if (!/^\d{4}$/.test(pasteData)) return;
+                const digits = pasteData.split('');
+                inputs.forEach((inp, i) => inp.value = digits[i]);
+                inputs[3].focus();
+            });
+        });
+
+        function getInputValue() {
+            let val = "";
+            inputs.forEach(input => val += input.value);
+            return val;
+        }
+
+        function validateInput(str) {
+            if (str.length !== 4) return "請填滿 4 個數字";
+            if (!/^\d+$/.test(str)) return "只能輸入數字";
+            const uniqueSet = new Set(str.split(''));
+            if (uniqueSet.size !== 4) return "數字不能重複";
+            return null;
+        }
+
+        function checkAB(guess, ans) {
+            let a = 0;
+            let b = 0;
+            for (let i = 0; i < 4; i++) {
+                if (guess[i] === ans[i]) a++;
+                else if (ans.includes(guess[i])) b++;
+            }
+            return `${a}A${b}B`;
+        }
+
+        function handleGuess() {
+            if (isGameOver) return;
+            const val = getInputValue();
+            const errorMsg = validateInput(val);
+
+            if (errorMsg) {
+                msgBox.textContent = errorMsg;
+                msgBox.style.color = "var(--error-color)";
+                const container = document.getElementById('inputContainer');
+                container.style.transform = "translateX(5px)";
+                setTimeout(() => container.style.transform = "translateX(0)", 100);
+                setTimeout(() => container.style.transform = "translateX(-5px)", 200);
+                setTimeout(() => container.style.transform = "translateX(0)", 300);
+                return;
+            }
+
+            count++;
+            guessCountSpan.textContent = count;
+            msgBox.textContent = "";
+
+            const result = checkAB(val, answer);
+            addHistory(val, result);
+
+            if (result !== "4A0B") {
+                inputs.forEach(input => input.value = "");
+                inputs[0].focus();
+            } else {
+                gameWin();
+            }
+        }
+
+        function addHistory(guess, result) {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            let resultClass = 'result-text';
+            if (result === "4A0B") resultClass += ' result-success';
+
+            item.innerHTML = `
+            <span class="guess-val">${guess}</span>
+            <span class="${resultClass}">${result}</span>
+        `;
+            // 改回 prepend (最新的在最上面)，列表會自然往下推
+            historyList.prepend(item);
+        }
+
+        function gameWin() {
+            isGameOver = true;
+            msgBox.textContent = `恭喜！你用了 ${count} 次猜中答案！`;
+            msgBox.style.color = "var(--success-color)";
+            inputs.forEach(input => input.disabled = true);
+            submitBtn.disabled = true;
+            restartBtn.style.display = "block";
+        }
+
+        submitBtn.addEventListener('click', handleGuess);
+        restartBtn.addEventListener('click', initGame);
+
+        initGame();
+    </script>
+
+</body>
+
+</html>
