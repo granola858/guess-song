@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>無限心臟病 - 反應測速</title>
+    <style>
+        :root {
+            /* --- 顏色調整區 --- */
+            --primary-color: #86D16A;       /* 新主色調：清新綠 */
+            --primary-light: #f0f9eb;       /* 搭配主色的淺綠背景 */
+            /* ----------------- */
+            --accent-color: #ff5252;        /* 錯誤/退步提示色 (紅) */
+            --success-color: #4caf50;       /* 進步提示色 (深綠) */
+            --text-color: #37474f;          /* 深灰文字 */
+            --card-bg: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--primary-light);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 頂部區域 */
+        .header {
+            padding-top: 30px;
+            text-align: center;
+            height: 15%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            margin: 0;
+            color: var(--primary-color);
+            letter-spacing: 1.5px;
+            font-weight: 800;
+        }
+
+        /* 遊戲主視覺區域 (卡片) */
+        .game-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            position: relative;
+        }
+
+        /* 口號顯示 - 初始隱藏 */
+        .call-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            background: rgba(255,255,255,0.8);
+            padding: 8px 25px;
+            border-radius: 50px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            opacity: 0; /* 初始隱藏 */
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+        
+        .call-number.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* 撲克牌 */
+        .card {
+            width: 200px;
+            height: 280px;
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            position: relative;
+            transition: transform 0.1s, box-shadow 0.2s;
+            cursor: pointer; /* 讓滑鼠變成手指 */
+        }
+
+        /* 遊戲進行中卡片不可點擊的樣式 */
+        .card.playing {
+            cursor: default;
+        }
+
+        .card.red { color: #e91e63; }
+        .card.black { color: #2d3436; }
+
+        .card-top, .card-bottom {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 1.4rem;
+            font-weight: bold;
+            line-height: 1;
+        }
+        .card-bottom { transform: rotate(180deg); }
+        .card-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+        }
+
+        /* 初始狀態的卡片內容 */
+        .start-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color); /* 使用主色調 */
+            text-align: center;
+            width: 100%;
+            line-height: 1.5;
+        }
+
+        /* 下方操作區域 */
+        .controls-container {
+            width: 100%;
+            padding: 25px;
+            background: white;
+            border-top-left-radius: 30px;
+            border-top-right-radius: 30px;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            height: 48%;
+        }
+
+        /* SNAP 按鈕 (最大) */
+        .btn-snap {
+            width: 100%;
+            background-color: #cfd8dc; /* 初始灰色 */
+            color: white;
+            height: 75px;
+            border: none;
+            border-radius: 18px;
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            transition: all 0.2s;
+            box-shadow: none;
+        }
+
+        /* 遊戲中 SNAP 按鈕變色 */
+        .btn-snap.active {
+            background-color: var(--primary-color);
+            /* 產生一個比主色深一點的陰影 */
+            box-shadow: 0 6px 0 #6ebf55; 
+            cursor: pointer;
+        }
+        
+        .btn-snap.active:active {
+            transform: translateY(4px);
+            box-shadow: none;
+        }
+
+        /* 歷史紀錄區 - 初始隱藏 */
+        .history-panel {
+            width: 100%;
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #f0f0f0;
+            border-radius: 12px;
+            padding: 15px;
+            background: #fafafa;
+            font-size: 0.95rem;
+            display: none; /* 隱藏 */
+        }
+        
+        .history-panel.show {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px dashed #eee;
+            color: #607d8b;
+        }
+        .history-item:first-child {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        .history-item .bad { color: var(--accent-color); font-size: 0.85em; }
+        .history-item .good { color: var(--success-color); font-size: 0.85em; }
+
+        /* 重新開局按鈕 */
+        .btn-restart {
+            width: 200px;
+            padding: 12px;
+            font-size: 1rem;
+            background: transparent;
+            color: #b0bec5;
+            border: 1px solid #eceff1;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: auto; /* 推到底部 */
+            transition: all 0.2s;
+        }
+        
+        .btn-restart:hover {
+            color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        /* 彈窗樣式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            width: 85%;
+            max-width: 320px;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popIn {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .result-title { font-size: 1.5rem; margin-bottom: 10px; font-weight: bold; }
+        .result-time { font-size: 3rem; color: var(--text-color); font-weight: bold; margin: 5px 0 15px 0; }
+        .result-msg { color: #78909c; margin-bottom: 25px; font-size: 1rem; line-height: 1.5; }
+        
+        .btn-continue {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(134, 209, 106, 0.4); /* 使用主色調的陰影 */
+        }
+
+        /* 錯誤動畫 */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+        .shake { animation: shake 0.3s; }
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>HEART ATTACK</h1>
+    </div>
+
+    <div class="game-area">
+        <div class="call-number" id="callNum">準備開始</div>
+        
+        <div class="card" id="cardDisplay" onclick="handleCardClick()">
+            <div class="start-msg">點擊開始</div>
+        </div>
+    </div>
+
+    <div class="controls-container">
+        <button class="btn-snap" id="snapBtn" onclick="playerSnap()" disabled>SNAP!</button>
+
+        <div class="history-panel" id="historyPanel">
+            </div>
+
+        <button class="btn-restart" id="restartBtn" onclick="fullReset()">重新開局</button>
+    </div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal-content">
+            <div class="result-title" id="modalTitle">標題</div>
+            <div class="result-time" id="modalTime">0.000s</div>
+            <p class="result-msg" id="modalMsg">評語</p>
+            <button class="btn-continue" onclick="continueGame()">繼續下一局</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 遊戲核心變數 ---
+        const suits = ['♠', '♥', '♦', '♣'];
+        const displayValues = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        
+        let gameInterval = null;
+        let isRunning = false;      // 遊戲是否正在跑
+        let isMatch = false;        // 是否配對成功
+        let matchStartTime = 0;     // 配對時間點
+        let dealSpeed = 900;        // 發牌速度 (毫秒)
+        
+        let currentCall = 0;        // 目前喊的數字 (1-13)
+        let currentCardVal = 0;     // 目前牌面數字
+        
+        let historyData = [];       // 儲存成績
+
+        // --- DOM 元素 ---
+        const cardDisplay = document.getElementById('cardDisplay');
+        const callNumDisplay = document.getElementById('callNum');
+        const snapBtn = document.getElementById('snapBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const historyPanel = document.getElementById('historyPanel');
+        const modal = document.getElementById('modal');
+
+        // --- 卡片點擊處理 ---
+        function handleCardClick() {
+            // 只有在遊戲還沒開始時，點擊卡片才有效
+            if (!isRunning) {
+                startGame();
+            }
+        }
+
+        // --- 開始遊戲 ---
+        function startGame() {
+            isRunning = true;
+            
+            // UI 更新：進入遊戲狀態
+            cardDisplay.classList.add('playing'); // 移除手指游標
+            callNumDisplay.classList.add('show'); // 顯示喊話氣泡
+            historyPanel.classList.add('show');   // 顯示歷史紀錄區
+            
+            snapBtn.disabled = false;
+            snapBtn.classList.add('active');      // 讓 SNAP 按鈕變色亮起
+            
+            currentCall = 0;
+            
+            // 如果是第一次開始（沒有任何內容），可以在這裡清空或初始化
+            if (historyPanel.innerHTML.trim() === '') {
+                 historyPanel.innerHTML = '<div style="text-align:center; color:#e0e0e0; padding-top:20px;">等待成績...</div>';
+            }
+
+            nextTurn(); // 發第一張
+            gameInterval = setInterval(nextTurn, dealSpeed);
+        }
+
+        // --- 完全重置 (回到初始畫面) ---
+        function fullReset() {
+            clearInterval(gameInterval);
+            isRunning = false;
+            historyData = [];
+            
+            // UI 還原：回到初始狀態
+            cardDisplay.classList.remove('playing');
+            callNumDisplay.classList.remove('show');
+            historyPanel.classList.remove('show');
+            
+            snapBtn.disabled = true;
+            snapBtn.classList.remove('active');
+            
+            // 還原卡片內容為「點擊開始」
+            cardDisplay.className = 'card'; // 移除紅黑樣式
+            cardDisplay.innerHTML = '<div class="start-msg">點擊開始</div>';
+            
+            // 清空歷史區塊內容
+            historyPanel.innerHTML = '';
+            
+            // 關閉彈窗 (如果有的話)
+            modal.style.display = 'none';
+        }
+
+        // --- 下一回合 (發牌邏輯) ---
+        function nextTurn() {
+            // 檢查錯過邏輯 (上一張 Match 但沒按)
+            if (isMatch) {
+                callNumDisplay.style.color = 'var(--accent-color)';
+                setTimeout(() => callNumDisplay.style.color = 'var(--primary-color)', 300);
+            }
+
+            // 1. 更新喊話
+            currentCall++;
+            if (currentCall > 13) currentCall = 1;
+            callNumDisplay.innerText = `喊數：${displayValues[currentCall - 1]}`;
+
+            // 2. 隨機發牌
+            const randomSuit = suits[Math.floor(Math.random() * 4)];
+            const randomVal = Math.floor(Math.random() * 13) + 1;
+            currentCardVal = randomVal;
+
+            // 3. 渲染卡片
+            renderCard(randomSuit, randomVal);
+
+            // 4. 判定
+            if (currentCall === currentCardVal) {
+                isMatch = true;
+                matchStartTime = performance.now();
+            } else {
+                isMatch = false;
+            }
+        }
+
+        function renderCard(suit, val) {
+            const valStr = displayValues[val - 1];
+            const isRed = (suit === '♥' || suit === '♦');
+            
+            cardDisplay.className = `card playing ${isRed ? 'red' : 'black'}`;
+            // 動畫
+            cardDisplay.style.transform = "scale(0.95)";
+            setTimeout(() => cardDisplay.style.transform = "scale(1)", 100);
+
+            cardDisplay.innerHTML = `
+                <div class="card-top">
+                    <span>${valStr}</span><span>${suit}</span>
+                </div>
+                <div class="card-center">${suit}</div>
+                <div class="card-bottom">
+                    <span>${valStr}</span><span>${suit}</span>
+                </div>
+            `;
+        }
+
+        // --- 玩家按下 SNAP ---
+        function playerSnap() {
+            if (!isRunning) return;
+
+            if (isMatch) {
+                // 成功
+                clearInterval(gameInterval);
+                const reactionTime = (performance.now() - matchStartTime) / 1000;
+                handleSuccess(reactionTime);
+            } else {
+                // 失敗 (誤按)
+                cardDisplay.classList.add('shake');
+                setTimeout(() => cardDisplay.classList.remove('shake'), 300);
+                
+                // 在歷史加一筆懲罰 (可選)
+                const tempMsg = document.createElement('div');
+                tempMsg.className = 'history-item';
+                tempMsg.style.color = 'var(--accent-color)';
+                tempMsg.innerHTML = '<span style="flex:1">誤按!</span> <span>+0.5s</span>';
+                
+                // 移除"等待成績"提示
+                if(historyPanel.innerText.includes('等待成績')) historyPanel.innerHTML = '';
+                historyPanel.insertBefore(tempMsg, historyPanel.firstChild);
+            }
+        }
+
+        // --- 處理成功並顯示彈窗 ---
+        function handleSuccess(time) {
+            const currentSec = parseFloat(time.toFixed(3));
+            let prevSec = null;
+            
+            // 尋找上一筆有效成績 (排除懲罰)
+            if (historyData.length > 0) {
+                prevSec = historyData[historyData.length - 1];
+            }
+            historyData.push(currentSec);
+
+            // 更新彈窗內容
+            const modalTitle = document.getElementById('modalTitle');
+            const modalMsg = document.getElementById('modalMsg');
+            const modalTime = document.getElementById('modalTime');
+
+            modalTime.innerText = `${currentSec}s`;
+            
+            if (prevSec === null) {
+                modalTitle.innerText = "開局順利！";
+                modalTitle.style.color = "var(--primary-color)";
+                modalMsg.innerText = "第一筆成績已記錄，繼續保持！";
+            } else {
+                if (currentSec < prevSec) {
+                    modalTitle.innerText = "恭喜進步！";
+                    modalTitle.style.color = "var(--success-color)";
+                    modalMsg.innerText = `比上次快了 ${(prevSec - currentSec).toFixed(3)}秒！心臟很強喔！`;
+                } else {
+                    modalTitle.innerText = "退步囉...";
+                    modalTitle.style.color = "var(--accent-color)";
+                    modalMsg.innerText = `比上次慢了 ${(currentSec - prevSec).toFixed(3)}秒，是不是老了？`;
+                }
+            }
+
+            updateHistoryUI(currentSec, prevSec);
+            modal.style.display = 'flex';
+        }
+
+        function updateHistoryUI(current, prev) {
+            // 清除"等待成績"
+            if(historyPanel.innerText.includes('等待成績')) historyPanel.innerHTML = '';
+
+            const index = historyData.length;
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            
+            let statusTag = '';
+            if (prev !== null) {
+                if (current < prev) statusTag = '<span class="good"> (▲進步)</span>';
+                else statusTag = '<span class="bad"> (▼退步)</span>';
+            } else {
+                statusTag = '<span style="font-size:0.8em; color:#bdbdbd"> (New)</span>';
+            }
+
+            item.innerHTML = `
+                <span>第 ${index} 次</span>
+                <span>${current}s ${statusTag}</span>
+            `;
+            
+            historyPanel.insertBefore(item, historyPanel.firstChild);
+        }
+
+        // --- 繼續下一局 ---
+        function continueGame() {
+            modal.style.display = 'none';
+            isMatch = false; 
+            
+            // 稍微緩衝再開始
+            setTimeout(() => {
+                nextTurn();
+                gameInterval = setInterval(nextTurn, dealSpeed);
+            }, 500);
+        }
+    </script>
+</body>
+</html>
