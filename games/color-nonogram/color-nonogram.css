@@ -461,16 +461,25 @@
             display: flex;
             gap: 12px;
             justify-content: center;
-            width: min(100%, 420px);
+            align-items: center;
+            width: auto;
+            max-width: 100%;
             margin: 0 auto;
         }
 
-        .btn-group>.primary-btn,
-        .btn-group>.secondary-btn {
-            flex: 1 1 0;
-            min-width: 0;
-            max-width: 100px;
-            padding: 10px 6px;
+        /* 圖示動作按鈕：固定寬高 48x44，比例一致且防過度拉伸 */
+        #main-actions > .primary-btn,
+        #main-actions > .secondary-btn {
+            flex: 0 0 48px;
+            width: 48px;
+            height: 44px;
+            min-width: 48px;
+            max-width: 48px;
+            padding: 0;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .confirm-overlay {
@@ -613,15 +622,8 @@
             }
 
             .btn-group {
-                gap: 8px;
-                width: min(100%, 390px);
-            }
-
-            .btn-group>.primary-btn,
-            .btn-group>.secondary-btn {
-                max-width: none;
-                padding: 9px 4px;
-                font-size: 0.86rem;
+                gap: 10px;
+                width: auto;
             }
         }
 
@@ -714,8 +716,8 @@
                 min-width: 48px;
             }
 
-            .btn-group>.primary-btn,
-            .btn-group>.secondary-btn {
-                padding: 7px 4px;
+            #main-actions>.primary-btn,
+            #main-actions>.secondary-btn {
+                height: 42px;
             }
         }

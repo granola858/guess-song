@@ -19,7 +19,10 @@ const STORAGE_KEY = 'bobo-battleship-saved-game-v1';
 class SoundFX {
   constructor() {
     this.ctx = null;
-    this.muted = localStorage.getItem('battleship-muted') === 'true';
+    this.muted = false;
+    try {
+      this.muted = localStorage.getItem('battleship-muted') === 'true';
+    } catch (_) {}
     this.bindLifecycle();
   }
 
@@ -67,7 +70,9 @@ class SoundFX {
 
   toggleMute() {
     this.muted = !this.muted;
-    localStorage.setItem('battleship-muted', this.muted);
+    try {
+      localStorage.setItem('battleship-muted', this.muted);
+    } catch (_) {}
     return this.muted;
   }
 

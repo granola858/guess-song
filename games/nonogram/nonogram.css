@@ -720,25 +720,42 @@
       box-shadow: none;
     }
 
-    #clear-board-btn {
-      min-width: 46px;
-      padding-inline: 12px;
-    }
-
     .btn-group {
       display: flex;
-      gap: 8px;
+      gap: 12px;
       justify-content: center;
-      width: min(100%, 420px);
+      align-items: center;
+      width: auto;
+      max-width: 100%;
       margin: 0 auto;
     }
 
-    .btn-group>.primary-btn,
-    .btn-group>.secondary-btn {
-      flex: 1 1 0;
-      min-width: 0;
-      max-width: 100px;
-      padding: 10px 6px;
+    /* 圖示動作按鈕：固定寬高 48x44，比例一致且防過度拉伸 */
+    #main-actions > .primary-btn,
+    #main-actions > .secondary-btn,
+    #result-btns > button:only-child {
+      flex: 0 0 48px;
+      width: 48px;
+      height: 44px;
+      min-width: 48px;
+      max-width: 48px;
+      padding: 0;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 結果區塊有文字的雙按鈕（例如直接解答、再試一次） */
+    #result-btns > button:not(:only-child) {
+      flex: 0 0 auto;
+      min-width: 104px;
+      height: 44px;
+      padding: 0 20px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .confirm-overlay {
@@ -828,15 +845,15 @@
       }
 
       .btn-group {
-        gap: 8px;
-        width: min(100%, 390px);
+        gap: 10px;
+        width: auto;
       }
 
-      .btn-group > .primary-btn,
-      .btn-group > .secondary-btn {
-        max-width: none;
-        padding: 9px 4px;
-        font-size: 0.86rem;
+      #result-btns > button:not(:only-child) {
+        min-width: 96px;
+        height: 42px;
+        padding: 0 16px;
+        font-size: 0.88rem;
       }
     }
 

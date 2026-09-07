@@ -8,7 +8,10 @@ const STATS_KEY = 'loop_game_stats';
 class SoundManager {
   constructor() {
     this.ctx = null;
-    this.enabled = localStorage.getItem('loopnet_sound') !== 'false';
+    this.enabled = true;
+    try {
+      this.enabled = localStorage.getItem('loopnet_sound') !== 'false';
+    } catch (_) {}
     this.bindLifecycle();
   }
 

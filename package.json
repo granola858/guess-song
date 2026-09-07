@@ -1,6 +1,6 @@
 {
   "name": "mini-games",
-  "version": "1.15.2",
+  "version": "1.15.3",
   "description": "波波小遊戲 - 純前端小遊戲合輯，每款遊戲收納於 games/ 底下的獨立資料夾",
   "scripts": {
     "test": "node --test tests/games.test.js tests/homepage.test.js tests/loop.test.js tests/make24.test.js tests/minesweeper.test.js tests/release.test.js"

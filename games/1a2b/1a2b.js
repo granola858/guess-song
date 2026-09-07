@@ -15,56 +15,67 @@
         const STORAGE_KEY = '1a2b_game_state';
 
         function saveGameState() {
-            const state = {
-                answer: answer,
-                isGameOver: isGameOver,
-                count: count,
-                historyData: historyData
-            };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            try {
+                const state = {
+                    answer: answer,
+                    isGameOver: isGameOver,
+                    count: count,
+                    historyData: historyData
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            } catch (e) {
+                console.warn('Unable to save 1A2B state to localStorage', e);
+            }
         }
 
         function loadGameState() {
-            const savedState = localStorage.getItem(STORAGE_KEY);
-            if (savedState) {
-                const state = JSON.parse(savedState);
-                answer = state.answer;
-                isGameOver = state.isGameOver;
-                count = state.count;
-                historyData = state.historyData || [];
+            try {
+                const savedState = localStorage.getItem(STORAGE_KEY);
+                if (savedState) {
+                    const state = JSON.parse(savedState);
+                    answer = state.answer;
+                    isGameOver = state.isGameOver;
+                    count = state.count;
+                    historyData = state.historyData || [];
 
-                guessCountSpan.textContent = count;
-                historyList.innerHTML = "";
+                    guessCountSpan.textContent = count;
+                    historyList.innerHTML = "";
 
-                // 修正點：移除 .reverse()。
-                // 因為 renderHistoryDOM 內部是用 prepend (插在最上方)，
-                // 依照原本 [舊 -> 新] 的順序推入，最後一筆新的自然會被擠到最上面。
-                historyData.forEach(item => {
-                    renderHistoryDOM(item.guess, item.result);
-                });
+                    // 修正點：移除 .reverse()。
+                    // 因為 renderHistoryDOM 內部是用 prepend (插在最上方)，
+                    // 依照原本 [舊 -> 新] 的順序推入，最後一筆新的自然會被擠到最上面。
+                    historyData.forEach(item => {
+                        renderHistoryDOM(item.guess, item.result);
+                    });
 
-                if (historyData.length > 0) {
-                    const lastResult = historyData[historyData.length - 1].result;
-                    currentResultDiv.textContent = lastResult;
-                    currentResultDiv.classList.add('show');
-                    if (lastResult === "4A0B") {
-                        currentResultDiv.classList.add('win');
+                    if (historyData.length > 0) {
+                        const lastResult = historyData[historyData.length - 1].result;
+                        currentResultDiv.textContent = lastResult;
+                        currentResultDiv.classList.add('show');
+                        if (lastResult === "4A0B") {
+                            currentResultDiv.classList.add('win');
+                        }
                     }
-                }
 
-                if (isGameOver) {
-                    gameWinUI();
-                }
+                    if (isGameOver) {
+                        gameWinUI();
+                    }
 
-                console.log("已恢復上次遊戲進度，謎底: " + answer);
-            } else {
+                    console.log("已恢復上次遊戲進度，謎底: " + answer);
+                } else {
+                    initGame(true);
+                }
+            } catch (e) {
+                console.warn('Unable to load 1A2B state from localStorage', e);
                 initGame(true);
             }
         }
 
         function initGame(forceNew = false) {
             if (forceNew) {
-                localStorage.removeItem(STORAGE_KEY);
+                try {
+                    localStorage.removeItem(STORAGE_KEY);
+                } catch (_) {}
                 answer = generateAnswer();
                 isGameOver = false;
                 count = 0;
