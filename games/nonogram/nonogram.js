@@ -67,21 +67,6 @@ let size = 8;
     const wakeLockCheckbox = document.getElementById('wake-lock-checkbox');
     const wakeLockNote = document.getElementById('wake-lock-note');
 
-    function bindFastPress(element, handler) {
-      let suppressClickUntil = 0;
-
-      element.addEventListener('pointerup', (event) => {
-        if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-        event.preventDefault();
-        suppressClickUntil = performance.now() + 500;
-        handler(event);
-      });
-
-      element.addEventListener('click', (event) => {
-        if (performance.now() < suppressClickUntil) return;
-        handler(event);
-      });
-    }
 
     function isValidHexColor(value) {
       return /^#[0-9A-F]{6}$/i.test(value || '');
@@ -617,7 +602,7 @@ let size = 8;
 
     // --- 綁定事件 (Event Listeners) ---
     levelBtns.forEach(btn => {
-      bindFastPress(btn, (e) => {
+      btn.addEventListener('click', (e) => {
         levelBtns.forEach(b => b.classList.remove('active'));
         e.currentTarget.classList.add('active');
         let newSize = parseInt(e.currentTarget.dataset.size);
@@ -626,14 +611,14 @@ let size = 8;
     });
 
     actionBtns.forEach(btn => {
-      bindFastPress(btn, (e) => {
+      btn.addEventListener('click', (e) => {
         actionBtns.forEach(b => b.classList.remove('active'));
         e.currentTarget.classList.add('active');
         currentAction = e.currentTarget.dataset.action;
       });
     });
 
-    bindFastPress(menuBtn, (e) => {
+    menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleMenu();
     });
@@ -643,7 +628,7 @@ let size = 8;
     });
 
     paletteBtns.forEach(btn => {
-      bindFastPress(btn, (e) => {
+      btn.addEventListener('click', (e) => {
         applyThemeColor(e.currentTarget.dataset.color);
         showSeedFeedback('顏色已更新。');
         saveData();
@@ -656,23 +641,23 @@ let size = 8;
       saveData();
     });
 
-    bindFastPress(darkModeToggle, () => {
+    darkModeToggle.addEventListener('click', () => {
       applyDarkMode(!darkMode);
       saveData();
     });
 
-    bindFastPress(copySeedBtn, copyCurrentSeed);
-    bindFastPress(loadSeedBtn, loadSeedFromInput);
+    copySeedBtn.addEventListener('click', copyCurrentSeed);
+    loadSeedBtn.addEventListener('click', loadSeedFromInput);
     seedInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') loadSeedFromInput();
     });
 
-    bindFastPress(checkBtn, checkAnswer);
-    bindFastPress(newGameBtn, () => { confirmStartNewGame(size); });
-    bindFastPress(undoBtn, undoLastAction);
-    bindFastPress(clearBoardBtn, clearBoard);
+    checkBtn.addEventListener('click', checkAnswer);
+    newGameBtn.addEventListener('click', () => { confirmStartNewGame(size); });
+    undoBtn.addEventListener('click', undoLastAction);
+    clearBoardBtn.addEventListener('click', clearBoard);
 
-    bindFastPress(boardLockBtn, toggleBoardLock);
+    boardLockBtn.addEventListener('click', toggleBoardLock);
     wakeLockCheckbox.addEventListener('change', (e) => {
       handleWakeLockChange(e.target.checked);
     });
@@ -1526,13 +1511,15 @@ let size = 8;
 
         const answerBtn = document.createElement('button');
         answerBtn.className = 'secondary-btn';
+        answerBtn.type = 'button';
         answerBtn.innerText = '直接解答';
-        answerBtn.onclick = showSolution;
+        answerBtn.addEventListener('click', showSolution);
 
         const retryBtn = document.createElement('button');
         retryBtn.className = 'primary-btn';
+        retryBtn.type = 'button';
         retryBtn.innerText = '再試一次';
-        retryBtn.onclick = () => { resetUI(); };
+        retryBtn.addEventListener('click', () => { resetUI(); });
 
         resultBtns.appendChild(answerBtn);
         resultBtns.appendChild(retryBtn);

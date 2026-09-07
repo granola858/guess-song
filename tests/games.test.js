@@ -118,3 +118,10 @@ test('遊戲頁不得再引用已移除的集中式 assets 路徑', () => {
       });
   });
 });
+
+test('Nonogram 按鈕使用標準 click 事件且不包含 bindFastPress 幽靈點擊機制', () => {
+  const nonogramJs = fs.readFileSync(path.join(gamesRoot, 'nonogram', 'nonogram.js'), 'utf8');
+  assert.ok(!nonogramJs.includes('bindFastPress'), 'nonogram.js 仍殘留 bindFastPress');
+  assert.ok(nonogramJs.includes("checkBtn.addEventListener('click'"), 'checkBtn 未綁定標準 click 事件');
+  assert.ok(nonogramJs.includes("menuBtn.addEventListener('click'"), 'menuBtn 未綁定標準 click 事件');
+});
