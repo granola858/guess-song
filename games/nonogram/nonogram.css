@@ -733,7 +733,7 @@
     #main-actions > .primary-btn,
     #main-actions > .secondary-btn,
     #result-btns > button {
-      flex: 1 1 0;
+      flex: 1 1 100px;
       min-width: 0;
       max-width: 100px;
       height: 44px;
