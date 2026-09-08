@@ -725,22 +725,21 @@
       gap: 12px;
       justify-content: center;
       align-items: center;
-      width: auto;
-      max-width: 100%;
+      width: min(100%, 420px);
       margin: 0 auto;
     }
 
-    /* 圖示動作按鈕：固定寬高 48x44，比例一致且防過度拉伸 */
+    /* 動作按鈕：等分寬度回到原本尺寸，並鎖定高度避免 Android 上被拉伸變形 */
     #main-actions > .primary-btn,
     #main-actions > .secondary-btn,
-    #result-btns > button:only-child {
-      flex: 0 0 48px;
-      width: 48px;
+    #result-btns > button {
+      flex: 1 1 0;
+      min-width: 0;
+      max-width: 100px;
       height: 44px;
-      min-width: 48px;
-      max-width: 48px;
-      padding: 0;
+      padding: 0 8px;
       border-radius: 12px;
+      line-height: 1;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -748,14 +747,17 @@
 
     /* 結果區塊有文字的雙按鈕（例如直接解答、再試一次） */
     #result-btns > button:not(:only-child) {
-      flex: 0 0 auto;
-      min-width: 104px;
-      height: 44px;
-      padding: 0 20px;
+      max-width: 140px;
+      padding: 0 12px;
       border-radius: 14px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+      white-space: nowrap;
+    }
+
+    /* 圖示不隨按鈕寬度縮放，維持固定比例（Android WebView 防變形） */
+    .btn-group button > svg {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
     }
 
     .confirm-overlay {
@@ -846,13 +848,16 @@
 
       .btn-group {
         gap: 10px;
-        width: auto;
+        width: min(100%, 390px);
+      }
+
+      #main-actions > .primary-btn,
+      #main-actions > .secondary-btn,
+      #result-btns > button {
+        height: 42px;
       }
 
       #result-btns > button:not(:only-child) {
-        min-width: 96px;
-        height: 42px;
-        padding: 0 16px;
         font-size: 0.88rem;
       }
     }
