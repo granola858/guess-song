@@ -13,8 +13,8 @@ const combinedSource = html + '\n' + homeJs;
 const cards = [...html.matchAll(/<article class="game-card"\s+data-id="([^"]+)"\s+data-category="([^"]+)"\s+data-search="([^"]+)"[^>]*>[\s\S]*?<a class="card-link" href="([^"]+)"[^>]*>[\s\S]*?<h3>([^<]+)<\/h3>[\s\S]*?<\/article>/g)]
   .map(([, id, category, search, href, title]) => ({ id, category, search, href, title }));
 
-test('首頁列出 15 個具有唯一 ID 的完整遊戲入口', () => {
-  assert.equal(cards.length, 15);
+test('首頁列出 16 個具有唯一 ID 的完整遊戲入口', () => {
+  assert.equal(cards.length, 16);
   assert.equal(new Set(cards.map(card => card.id)).size, cards.length);
   cards.forEach(card => {
     assert.ok(card.title.trim(), `${card.id} 缺少標題`);

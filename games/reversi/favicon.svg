@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="波波黑白棋">
+  <defs>
+    <linearGradient id="feltBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22803f"/>
+      <stop offset="1" stop-color="#14532d"/>
+    </linearGradient>
+    <linearGradient id="blackDisc" x1="0.3" y1="0.1" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#4b5563"/>
+      <stop offset="0.55" stop-color="#1f2937"/>
+      <stop offset="1" stop-color="#0b0f16"/>
+    </linearGradient>
+    <linearGradient id="whiteDisc" x1="0.3" y1="0.1" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f1f5f9"/>
+      <stop offset="1" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 棋盤底：深綠圓角矩形 -->
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="url(#feltBg)"/>
+  <rect x="1.6" y="1.6" width="28.8" height="28.8" rx="6.4" fill="none" stroke="#166534" stroke-width="1.2"/>
+
+  <!-- 淡淡的格線（4×4 示意） -->
+  <g stroke="#ffffff" stroke-opacity="0.14" stroke-width="1" stroke-linecap="round">
+    <path d="M4 11h24M4 16h24M4 21h24"/>
+    <path d="M11 4v24M16 4v24M21 4v24"/>
+  </g>
+
+  <!-- 黑子（左上） -->
+  <circle cx="11" cy="11" r="6" fill="#0b0f16" fill-opacity="0.35"/>
+  <circle cx="11" cy="11" r="5.6" fill="url(#blackDisc)" stroke="#000000" stroke-opacity="0.45" stroke-width="0.6"/>
+  <ellipse cx="9.3" cy="9" rx="2.1" ry="1.4" fill="#ffffff" fill-opacity="0.24" transform="rotate(-28 9.3 9)"/>
+
+  <!-- 白子（右下） -->
+  <circle cx="21" cy="21" r="6" fill="#0b0f16" fill-opacity="0.3"/>
+  <circle cx="21" cy="21" r="5.6" fill="url(#whiteDisc)" stroke="#94a3b8" stroke-opacity="0.7" stroke-width="0.6"/>
+  <ellipse cx="19.3" cy="19" rx="2.1" ry="1.4" fill="#ffffff" fill-opacity="0.85" transform="rotate(-28 19.3 19)"/>
+</svg>
