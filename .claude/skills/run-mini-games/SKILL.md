@@ -53,6 +53,19 @@ node .claude/skills/run-mini-games/smoke.mjs 2048 loop --no-shots
 這一層是 `npm test` 抓不到的：`tests/` 只做靜態檢查（檔案在不在、`new Function(src)` 能不能編譯），
 **真正的 runtime 崩潰只有把瀏覽器開起來才看得到**。
 
+### pre-push hook（已啟用）
+
+`.githooks/pre-push` 會在每次 `git push` 前擋一道：先跑 `npm test`，再跑冒煙測試（`--no-shots`），
+任一關沒過就中止推送。純推 tag 的那次會自動略過（發版流程先推分支、再推 tag，分支那次已經驗過了）。
+
+clone 下來要重新啟用一次（hook 本身有進版控，但 `core.hooksPath` 是本機設定）：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+真的要硬推：`git push --no-verify`。
+
 ### 單一遊戲：寫指令腳本
 
 寫一個純文字檔，一行一個指令，餵給 driver：
@@ -172,8 +185,9 @@ localStorage 讀寫有沒有包在 try/catch 裡。**不會開瀏覽器**，所�
   是 Vite 的 dev 進入點（指向 `/src/main.jsx`，靜態伺服器找不到）。真正的入口是
   **`games/guess-song/dist/index.html`**，首頁也是連到那裡，而且 `dist/` 有進版控
   （子專案的 `.gitignore` 把 `dist` 那行註解掉了）。
-- **`sic-bo` 沒有被首頁連到**。`games/` 有 18 個資料夾，首頁只有 17 張卡。smoke.mjs 會補掃
-  `games/` 目錄所以照樣測得到，但你在首頁上點不到它。
+- **`sic-bo` 是刻意從首頁隱藏的**，不是漏接。`games/` 有 18 個資料夾，首頁只列 17 張卡。
+  smoke.mjs 除了讀首頁連結還會補掃 `games/` 目錄，所以照樣會測到它 —— 這是故意的，
+  隱藏的遊戲一樣不能壞掉。**不要「順手」把它加回首頁。**
 - **reversi 的 `.board-row` 是 `display: contents`**，`getBoundingClientRect()` 回 0×0。
   用座標點它會失敗（driver 會報「元素沒有尺寸」）。要點 `#board .cell`。
 - **2048 磚塊的 `textContent` 含皮膚 emoji**：進化皮膚下會讀到 `"🐟4"` 而不是 `"4"`。
@@ -219,4 +233,6 @@ Remove-Item "$env:TEMP\bobo-cdp-*" -Recurse -Force -ErrorAction SilentlyContinue
   driver.mjs    CDP 驅動器（靜態伺服器 + Chrome 啟動 + 指令直譯器，可被 import）
   smoke.mjs     全站冒煙測試，import driver.mjs 的 Driver
   _shots/       截圖產物（已加進 .gitignore）
+
+.githooks/pre-push  推送前自動跑 npm test + 冒煙測試
 ```
