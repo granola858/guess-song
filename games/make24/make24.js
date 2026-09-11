@@ -257,77 +257,48 @@ function isPuzzleMatchingDifficulty(puzzleInfo, mode) {
 
 /* --------------------------------------------------------------------------
    音效管理
+   - 瀏覽器樣板（AudioContext 延後建立、手勢解鎖、visibilitychange 暫停／喚醒、
+     節點 stop 與 disconnect 回收）一律交給共用模組 BoboAudio，
+     本類別只留下 24 點自己的四個音色
+   - 本遊戲沒有音效開關，也沒有對應的偏好鍵，因此 create() 不帶 storageKey
+     （開關只存在記憶體，預設開啟，行為與重構前完全一致）
+   - 共用模組可缺席：載入失敗時 kit 為 null，遊戲照常能玩，只是沒有音效
+   - 音量 0.12、衰減地板 0.001 是本遊戲原本四個音色共用的值
    -------------------------------------------------------------------------- */
+const SOUND_GAIN = 0.12;
+const SOUND_FLOOR = 0.001;
+
 class SoundManager {
   constructor() {
-    this.ctx = null;
-    this.bindLifecycle();
-  }
-
-  bindLifecycle() {
-    if (typeof document === 'undefined') return;
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        if (this.ctx && this.ctx.state === 'running') {
-          this.ctx.suspend().catch(() => {});
-        }
-      } else {
-        if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume().catch(() => {});
-        }
-      }
-    });
-  }
-
-  init() {
-    if (!this.ctx) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (AudioContext) {
-        this.ctx = new AudioContext();
-      }
-    }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-  }
-
-  playTone(freq, type, duration, delay = 0) {
-    try {
-      this.init();
-      if (!this.ctx) return;
-
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, this.ctx.currentTime + delay);
-
-      gain.gain.setValueAtTime(0.12, this.ctx.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + delay + duration);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(this.ctx.currentTime + delay);
-      osc.stop(this.ctx.currentTime + delay + duration);
-    } catch (_) {}
+    this.kit = (typeof BoboAudio !== 'undefined' && BoboAudio) ? BoboAudio.create() : null;
   }
 
   playCardClick() {
-    this.playTone(520, 'sine', 0.08);
+    if (!this.kit) return;
+    this.kit.tone({
+      freq: 520, type: 'sine', duration: 0.08, gain: SOUND_GAIN, floor: SOUND_FLOOR
+    });
   }
 
   playOpClick() {
-    this.playTone(440, 'triangle', 0.06);
+    if (!this.kit) return;
+    this.kit.tone({
+      freq: 440, type: 'triangle', duration: 0.06, gain: SOUND_GAIN, floor: SOUND_FLOOR
+    });
   }
 
   playBackspace() {
-    this.playTone(280, 'sine', 0.08);
+    if (!this.kit) return;
+    this.kit.tone({
+      freq: 280, type: 'sine', duration: 0.08, gain: SOUND_GAIN, floor: SOUND_FLOOR
+    });
   }
 
   playWin() {
-    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
-      this.playTone(f, 'triangle', 0.25, i * 0.09);
+    if (!this.kit) return;
+    // 原本用 delay = i * 0.09 手動排四個音，改用 stagger 走音訊時鐘排程，聽感相同
+    this.kit.chord([523.25, 659.25, 783.99, 1046.5], {
+      type: 'triangle', duration: 0.25, gain: SOUND_GAIN, stagger: 0.09, floor: SOUND_FLOOR
     });
   }
 }

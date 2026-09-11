@@ -798,145 +798,94 @@ function _appDirFromResolve(result) {
 }
 
 // --------------------------------------------------------------------------
-// Web Audio API 音效合成器（滑動、合併、生成、達標、結束、撞牆）
-// 所有 AudioContext 操作一律包 try...catch：iOS 未解鎖、瀏覽器擋自動播放都不能讓遊戲掛掉。
+// 音效合成器（滑動、合併、生成、達標、結束、撞牆）
+// 只保留 2048 自己的「音色」；AudioContext 建立／解鎖、背景暫停、節點回收、
+// 開關持久化這些瀏覽器樣板全部交給共用模組 assets/js/bobo-audio.js。
+// 模組缺席時（測試環境用 new Function 編譯本檔）this.kit 會是 null，
+// 所有 play* 安靜退場，遊戲照常能玩，只是沒有聲音。
 // --------------------------------------------------------------------------
 class _appSoundManager {
   constructor() {
-    this.ctx = null;
-    this.enabled = true;
-    const pref = _appReadJson(PREF_KEY, {});
-    if (_appIsPlainObject(pref) && typeof pref.sound === 'boolean') {
-      this.enabled = pref.sound;
-    }
-    this.bindLifecycle();
+    // 開關存在 g2048_pref_v1 的 sound 欄位；模組會「讀回整包再只改這個欄位」，
+    // 不會清掉同一個 key 裡的 skin / size / mode 等其他偏好。
+    this.kit = (typeof BoboAudio !== 'undefined' && BoboAudio)
+      ? BoboAudio.create({ storageKey: PREF_KEY, storageField: 'sound' })
+      : null;
+    // 模組缺席時仍要有一個可讀寫的開關，讓 UI 與偏好存檔照常運作
+    this.fallbackEnabled = true;
   }
 
-  // 切到背景時暫停音訊，回前景再喚醒（行動裝置省電與通話中斷）
-  bindLifecycle() {
-    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
-    document.addEventListener('visibilitychange', () => {
-      try {
-        if (document.hidden) {
-          if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {});
-        } else if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
-          this.ctx.resume().catch(() => {});
-        }
-      } catch (_) {}
-    });
+  // this.sound.enabled 是遊戲各處（updateSoundIcon / savePreferences /
+  // loadPreferences）讀寫的介面，維持原樣；有模組時一律以模組的即時值為準。
+  get enabled() {
+    return this.kit ? this.kit.enabled : this.fallbackEnabled;
   }
 
-  init() {
-    try {
-      if (typeof window === 'undefined') return;
-      if (!this.ctx) {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        this.ctx = new AudioCtx();
-      }
-      if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
-        this.ctx.resume().catch(() => {});
-      }
-    } catch (_) {
-      this.ctx = null;
-    }
+  set enabled(on) {
+    if (this.kit) this.kit.enabled = !!on;
+    else this.fallbackEnabled = !!on;
+  }
+
+  // 使用者手勢時呼叫：iOS 唯一能建立／解鎖 AudioContext 的時機
+  unlock() {
+    if (this.kit) this.kit.unlock();
   }
 
   toggle() {
-    this.enabled = !this.enabled;
-    const pref = _appReadJson(PREF_KEY, {});
-    const next = _appIsPlainObject(pref) ? pref : {};
-    next.sound = this.enabled;
-    _appWriteJson(PREF_KEY, next);
-    if (this.enabled) this.init();
-    return this.enabled;
-  }
-
-  playTone(freq, type = 'sine', duration = 0.08, gainVal = 0.12, delay = 0) {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime + delay;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, now);
-      gain.gain.setValueAtTime(gainVal, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + duration);
-    } catch (_) {}
-  }
-
-  playSweep(fromFreq, toFreq, type = 'sine', duration = 0.18, gainVal = 0.12) {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(fromFreq, now);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(1, toFreq), now + duration);
-      gain.gain.setValueAtTime(gainVal, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + duration);
-    } catch (_) {}
+    if (this.kit) return this.kit.toggle();
+    this.fallbackEnabled = !this.fallbackEnabled;
+    return this.fallbackEnabled;
   }
 
   // 滑動：極短的氣音，連刷十次也不會吵
   playSlide() {
-    this.playTone(320, 'triangle', 0.05, 0.07);
+    if (this.kit) this.kit.tone({ freq: 320, type: 'triangle', duration: 0.05, gain: 0.07 });
   }
 
   // 合併：磚越大音越高，讓玩家用耳朵就聽得出滾雪球
   playMerge(level) {
+    if (!this.kit) return;
     const step = _appClamp(Number.isFinite(level) ? level : 1, 1, 12);
     const freq = 262 * Math.pow(2, (step - 1) / 6);
-    this.playTone(freq, 'sine', 0.09, 0.13);
-    this.playTone(freq * 2, 'triangle', 0.06, 0.05, 0.02);
+    this.kit.tone({ freq, type: 'sine', duration: 0.09, gain: 0.13 });
+    this.kit.tone({ freq: freq * 2, type: 'triangle', duration: 0.06, gain: 0.05, delay: 0.02 });
   }
 
   // 生成：輕巧的點擊
   playSpawn() {
-    this.playTone(660, 'sine', 0.04, 0.05);
+    if (this.kit) this.kit.tone({ freq: 660, type: 'sine', duration: 0.04, gain: 0.05 });
   }
 
-  // 達標：上行大三和弦琶音
+  // 達標：上行大三和弦琶音（改用音訊時鐘排程，取代原本的 setTimeout）
   playTarget() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
-      setTimeout(() => this.playTone(freq, 'sine', 0.22, 0.15), idx * 120);
+    if (!this.kit) return;
+    this.kit.chord([523.25, 659.25, 783.99, 1046.5], {
+      type: 'sine',
+      duration: 0.22,
+      gain: 0.15,
+      stagger: 0.12
     });
   }
 
   // 結束：下行小三和弦
   playOver() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    [392, 329.63, 261.63].forEach((freq, idx) => {
-      setTimeout(() => this.playTone(freq, 'triangle', 0.26, 0.13), idx * 150);
+    if (!this.kit) return;
+    this.kit.chord([392, 329.63, 261.63], {
+      type: 'triangle',
+      duration: 0.26,
+      gain: 0.13,
+      stagger: 0.15
     });
   }
 
   // 撞牆：悶悶的低頻回饋
   playWall() {
-    this.playTone(96, 'square', 0.07, 0.08);
+    if (this.kit) this.kit.tone({ freq: 96, type: 'square', duration: 0.07, gain: 0.08 });
   }
 
   // 加時：短促上滑音
   playBonus() {
-    this.playSweep(520, 1040, 'sine', 0.16, 0.1);
+    if (this.kit) this.kit.sweep({ from: 520, to: 1040, type: 'sine', duration: 0.16, gain: 0.1 });
   }
 }
 
@@ -1363,7 +1312,7 @@ class Game2048 {
     if (this.isInputBlocked()) return;
 
     // 使用者手勢是解鎖 AudioContext 的唯一時機
-    if (this.sound) this.sound.init();
+    if (this.sound) this.sound.unlock();
 
     const now = _appNow();
     const x = Number(event.clientX) || 0;

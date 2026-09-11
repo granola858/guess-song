@@ -5,170 +5,62 @@
 const STORAGE_KEY = 'loop_game_state';
 const STATS_KEY = 'loop_game_stats';
 
+/* 音效：薄薄一層音色定義，底下的 AudioContext 樣板一律交給共用模組 BoboAudio。
+   共用模組必須可缺席：載入失敗時遊戲照常玩，只是完全沒有音效。 */
 class SoundManager {
   constructor() {
-    this.ctx = null;
-    this.enabled = true;
-    try {
-      this.enabled = localStorage.getItem('loopnet_sound') !== 'false';
-    } catch (_) {}
-    this.bindLifecycle();
+    this.kit = (typeof BoboAudio !== 'undefined' && BoboAudio)
+      ? BoboAudio.create({ storageKey: 'loopnet_sound' })
+      : null;
   }
 
-  bindLifecycle() {
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        if (this.ctx && this.ctx.state === 'running') {
-          this.ctx.suspend().catch(() => {});
-        }
-      } else {
-        if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume().catch(() => {});
-        }
-      }
-    });
+  /* 目前是否發聲；模組缺席時恆為 false，UI 會顯示靜音圖示 */
+  get enabled() {
+    return this.kit ? this.kit.enabled : false;
   }
 
-  init() {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) this.ctx = new AudioCtx();
-    }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-  }
-
+  /* 切換音效並寫回 loopnet_sound，回傳切換後的狀態 */
   toggleSound() {
-    this.enabled = !this.enabled;
-    try {
-      localStorage.setItem('loopnet_sound', this.enabled);
-    } catch (_) {}
-    return this.enabled;
+    return this.kit ? this.kit.toggle() : false;
   }
 
   /* 旋轉開關點擊音效 (Relay Switch Click) */
   playRotate() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(520, now);
-    osc.frequency.exponentialRampToValueAtTime(180, now + 0.04);
-
-    gain.gain.setValueAtTime(0.22, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.04);
+    if (!this.kit) return;
+    this.kit.sweep({
+      from: 520, to: 180, type: 'triangle', duration: 0.04, gain: 0.22, floor: 0.001
+    });
   }
 
   /* 電流導通音效 (Electric Zap / Flow) */
   playFlow() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    [587.33, 739.99, 880.00].forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(freq, now + i * 0.02);
-
-      gain.gain.setValueAtTime(0.05, now + i * 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.02 + 0.12);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.02);
-      osc.stop(now + i * 0.02 + 0.12);
+    if (!this.kit) return;
+    this.kit.chord([587.33, 739.99, 880.00], {
+      type: 'sawtooth', duration: 0.12, gain: 0.05, stagger: 0.02, floor: 0.001
     });
   }
 
   /* 燈泡點亮叮噹音效 (Bulb Light-Up Chime) */
   playBulbLight() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    [659.25, 987.77, 1318.51].forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + i * 0.035);
-
-      gain.gain.setValueAtTime(0.12, now + i * 0.035);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.035 + 0.25);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.035);
-      osc.stop(now + i * 0.035 + 0.25);
+    if (!this.kit) return;
+    this.kit.chord([659.25, 987.77, 1318.51], {
+      type: 'sine', duration: 0.25, gain: 0.12, stagger: 0.035, floor: 0.001
     });
   }
 
   /* 提示音效 (Hint Chime) */
   playHint() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    [659.25, 880, 1174.66].forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + i * 0.05);
-
-      gain.gain.setValueAtTime(0.12, now + i * 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.22);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.05);
-      osc.stop(now + i * 0.05 + 0.22);
+    if (!this.kit) return;
+    this.kit.chord([659.25, 880, 1174.66], {
+      type: 'sine', duration: 0.22, gain: 0.12, stagger: 0.05, floor: 0.001
     });
   }
 
   /* 勝利電力全開和弦 (Power Victory Fanfare) */
   playWin() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
-    notes.forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + i * 0.07);
-
-      gain.gain.setValueAtTime(0.2, now + i * 0.07);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.45);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.07);
-      osc.stop(now + i * 0.07 + 0.45);
+    if (!this.kit) return;
+    this.kit.chord([523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98], {
+      type: 'triangle', duration: 0.45, gain: 0.2, stagger: 0.07, floor: 0.001
     });
   }
 }

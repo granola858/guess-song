@@ -1065,13 +1065,18 @@ function _appIsPlainObject(value) {
 }
 
 // 全站共用模組是「可缺席」的：Node 單元測試與模組載入失敗的頁面都沒有這些全域，
-// 此時下面兩個取用函式一律回 null，遊戲照常能玩（只是沒彩帶、主題退回 prefers-color-scheme）。
+// 此時下面三個取用函式一律回 null，遊戲照常能玩
+// （只是沒彩帶、沒音效、主題退回 prefers-color-scheme）。
 function _appThemeKit() {
   return (typeof BoboTheme !== 'undefined' && BoboTheme) ? BoboTheme : null;
 }
 
 function _appConfettiKit() {
   return (typeof BoboConfetti !== 'undefined' && BoboConfetti) ? BoboConfetti : null;
+}
+
+function _appAudioKit() {
+  return (typeof BoboAudio !== 'undefined' && BoboAudio) ? BoboAudio : null;
 }
 
 // 難度 id 白名單檢查：只認 DIFFICULTIES 的「自有屬性」。
@@ -1117,141 +1122,83 @@ function _appNextFrame(fn) {
 }
 
 // --------------------------------------------------------------------------
-// Web Audio API 音效合成器（落子、翻子、跳過、勝、敗、誤點）
+// 音效（落子、翻子、跳過、勝、敗、誤點）
+//
+// 瀏覽器樣板整段交給共用模組 BoboAudio：AudioContext 的延後建立與喚醒、
+// 手勢解鎖、visibilitychange 進背景 suspend／回前景 resume、
+// 每個 oscillator 的 stop() 與結束後 disconnect、
+// 以及開關寫回 reversi_pref_v1.sound（讀回整包只改 sound 欄位）。
+// 這個類別只剩下 reversi 自己的音色，頻率／波形／時長／音量／延遲一律照舊。
+//
+// 模組缺席時 kit 為 null，每個 play*() 安靜退場，遊戲照常能玩（只是沒聲音）。
 // --------------------------------------------------------------------------
 class ReversiSoundManager {
   constructor() {
-    this.ctx = null;
-    this.enabled = true;
+    const audio = _appAudioKit();
+    this.kit = audio ? audio.create({ storageKey: PREF_KEY, storageField: 'sound' }) : null;
+    // 模組缺席時開關只留在記憶體。這裡仍要讀回偏好：否則 savePreferences()
+    // 會把玩家原本開著的 sound 覆寫成 false，模組之後恢復了也變成靜音。
     const pref = _appReadJson(PREF_KEY, {});
-    if (_appIsPlainObject(pref) && typeof pref.sound === 'boolean') {
-      this.enabled = pref.sound;
-    }
-    this.bindLifecycle();
+    this.memoEnabled = (_appIsPlainObject(pref) && typeof pref.sound === 'boolean')
+      ? pref.sound
+      : true;
   }
 
-  // 切到背景時暫停音訊，回前景再喚醒（行動裝置省電與通話中斷）
-  bindLifecycle() {
-    if (typeof document === 'undefined' || !document.addEventListener) return;
-    document.addEventListener('visibilitychange', () => {
-      try {
-        if (document.hidden) {
-          if (this.ctx && this.ctx.state === 'running') {
-            this.ctx.suspend().catch(() => {});
-          }
-        } else if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
-          this.ctx.resume().catch(() => {});
-        }
-      } catch (_) {}
-    });
+  // 有模組時一律以 kit 為準（kit.enabled 是即時值，不是快照）
+  get enabled() {
+    return this.kit ? this.kit.enabled : this.memoEnabled;
   }
 
-  init() {
-    try {
-      if (typeof window === 'undefined') return;
-      if (!this.ctx) {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        this.ctx = new AudioCtx();
-      }
-      if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
-        this.ctx.resume().catch(() => {});
-      }
-    } catch (_) {
-      this.ctx = null;
-    }
+  set enabled(on) {
+    this.memoEnabled = !!on;
+    // setEnabled 會順手持久化，並在開啟時解鎖、關閉時停掉還在響的聲音
+    if (this.kit) this.kit.setEnabled(this.memoEnabled);
   }
 
   toggle() {
     this.enabled = !this.enabled;
-    const pref = _appReadJson(PREF_KEY, {});
-    const next = _appIsPlainObject(pref) ? pref : {};
-    next.sound = this.enabled;
-    _appWriteJson(PREF_KEY, next);
-    if (this.enabled) this.init();
     return this.enabled;
-  }
-
-  // 單音：所有 AudioContext 操作都包在 try...catch 內
-  playTone(freq, type = 'sine', duration = 0.08, gainVal = 0.14, delay = 0) {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime + delay;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, now);
-      gain.gain.setValueAtTime(gainVal, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + duration);
-    } catch (_) {}
-  }
-
-  // 掃頻音：跳過與誤點用
-  playSweep(fromFreq, toFreq, type = 'sine', duration = 0.18, gainVal = 0.14) {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(fromFreq, now);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(1, toFreq), now + duration);
-      gain.gain.setValueAtTime(gainVal, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + duration);
-    } catch (_) {}
   }
 
   // 落子：短促的木頭敲擊感
   playPlace() {
-    this.playTone(420, 'triangle', 0.07, 0.18);
-    this.playTone(210, 'sine', 0.1, 0.1, 0.01);
+    if (!this.kit) return;
+    this.kit.tone({ freq: 420, type: 'triangle', duration: 0.07, gain: 0.18 });
+    this.kit.tone({ freq: 210, type: 'sine', duration: 0.1, gain: 0.1, delay: 0.01 });
   }
 
   // 翻子：輕脆的滑音
   playFlip() {
-    this.playSweep(620, 980, 'sine', 0.12, 0.1);
+    if (!this.kit) return;
+    this.kit.sweep({ from: 620, to: 980, type: 'sine', duration: 0.12, gain: 0.1 });
   }
 
   // 跳過：下行提示音
   playPass() {
-    this.playSweep(520, 260, 'triangle', 0.22, 0.12);
+    if (!this.kit) return;
+    this.kit.sweep({ from: 520, to: 260, type: 'triangle', duration: 0.22, gain: 0.12 });
   }
 
-  // 勝利：上行大三和弦琶音
+  // 勝利：上行大三和弦琶音（原本的 setTimeout 琶音改用音訊時鐘排程，間隔不變）
   playWin() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
-      setTimeout(() => this.playTone(freq, 'sine', 0.22, 0.16), idx * 110);
+    if (!this.kit) return;
+    this.kit.chord([523.25, 659.25, 783.99, 1046.5], {
+      type: 'sine', duration: 0.22, gain: 0.16, stagger: 0.11
     });
   }
 
   // 落敗：下行小三和弦
   playLose() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    [392, 329.63, 261.63].forEach((freq, idx) => {
-      setTimeout(() => this.playTone(freq, 'triangle', 0.26, 0.14), idx * 140);
+    if (!this.kit) return;
+    this.kit.chord([392, 329.63, 261.63], {
+      type: 'triangle', duration: 0.26, gain: 0.14, stagger: 0.14
     });
   }
 
   // 誤點：悶悶的低頻回饋
   playInvalid() {
-    this.playTone(150, 'square', 0.09, 0.09);
+    if (!this.kit) return;
+    this.kit.tone({ freq: 150, type: 'square', duration: 0.09, gain: 0.09 });
   }
 }
 
