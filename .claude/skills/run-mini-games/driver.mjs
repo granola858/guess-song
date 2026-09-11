@@ -23,6 +23,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SKILL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(SKILL_DIR, '..', '..', '..');
 
+// 等 Chrome 寫出 DevToolsActivePort 的上限。本機冷啟動約 1 秒就好，
+// 但 CI runner 同時在跑別的工作流時會慢很多，抓緊一點就會變成假紅燈。
+// 這個值只在「Chrome 真的起不來」時才會等滿，正常路徑不受影響。
+const START_TIMEOUT_MS = 30000;
+
 const CHROME_CANDIDATES = [
   `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`,
   `${process.env['ProgramFiles(x86)']}\\Google\\Chrome\\Application\\chrome.exe`,
@@ -173,19 +178,36 @@ export class Driver {
       ...(process.env.CHROME_FLAGS ? process.env.CHROME_FLAGS.split(/\s+/).filter(Boolean) : []),
       'about:blank',
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
-    this.chrome.stderr.on('data', () => {});
+
+    // Chrome 的 stderr 平常是雜訊，但啟動失敗時它是唯一的線索，留最後一小段備用
+    let chromeStderr = '';
+    this.chrome.stderr.on('data', (chunk) => {
+      chromeStderr = (chromeStderr + chunk).slice(-1500);
+    });
+    // Chrome 自己死掉（缺 --no-sandbox、找不到共享記憶體…）就不必空等到逾時
+    let chromeExit = null;
+    this.chrome.on('exit', (code, signal) => { chromeExit = signal || code; });
 
     // port 0 → Chrome 把實際 port 寫進 profile 目錄的 DevToolsActivePort。
+    // 等 START_TIMEOUT_MS 而不是原本的 10 秒：GitHub runner 同時在跑部署工作流時，
+    // Chrome 冷啟動很容易超過 10 秒，那會變成跟程式碼無關的假紅燈（CI 上實際踩過）。
     const portFile = path.join(this.profile, 'DevToolsActivePort');
+    const deadline = Date.now() + START_TIMEOUT_MS;
     let wsUrl = null;
-    for (let i = 0; i < 100; i++) {
+    while (Date.now() < deadline) {
       if (fs.existsSync(portFile)) {
         const [p, pathPart] = fs.readFileSync(portFile, 'utf8').trim().split('\n');
         if (p && pathPart) { wsUrl = `ws://127.0.0.1:${p.trim()}${pathPart.trim()}`; break; }
       }
+      if (chromeExit !== null) break;
       await new Promise(r => setTimeout(r, 100));
     }
-    if (!wsUrl) throw new Error('Chrome 沒有寫出 DevToolsActivePort，啟動失敗');
+    if (!wsUrl) {
+      const why = chromeExit !== null
+        ? `Chrome 提早結束（${chromeExit}）`
+        : `等了 ${Math.round(START_TIMEOUT_MS / 1000)} 秒仍沒有 DevToolsActivePort`;
+      throw new Error(`Chrome 啟動失敗：${why}${chromeStderr.trim() ? `\n${chromeStderr.trim()}` : ''}`);
+    }
 
     const ws = new WebSocket(wsUrl);
     await new Promise((res, rej) => {

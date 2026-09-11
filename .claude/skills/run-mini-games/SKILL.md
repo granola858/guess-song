@@ -196,6 +196,9 @@ localStorage 讀寫有沒有包在 try/catch 裡。**不會開瀏覽器**，所�
   記得先 `sleep 300` 再 `eval`，否則會讀到動畫中間狀態。
 - **Windows 上 ESM 絕對路徑要用 `file:///`**，直接寫 `D:/...` 會噴
   `ERR_UNSUPPORTED_ESM_URL_SCHEME`。
+- **CI 上 Chrome 冷啟動會比本機慢很多**。driver 等 DevToolsActivePort 的上限是
+  30 秒（`START_TIMEOUT_MS`）：原本 10 秒，在 runner 同時跑部署工作流時不夠，
+  會變成跟程式碼無關的假紅燈。Chrome 自己提早死掉則會立刻失敗，不必等滿。
 
 ## Troubleshooting
 
@@ -203,7 +206,8 @@ localStorage 讀寫有沒有包在 try/catch 裡。**不會開瀏覽器**，所�
 |---|---|
 | `等不到元素：#board .cell` | selector 猜錯了。先跑 `probe` 看那一頁真正的結構，不要沿用別款遊戲的慣例（每款都不一樣） |
 | `元素沒有尺寸（可能被隱藏）：...` | 元素是 `display:contents` 或還沒渲染。reversi 的 `.board-row` 就是前者；其餘情況前面加 `wait` |
-| `Chrome 沒有寫出 DevToolsActivePort，啟動失敗` | 上一次的 Chrome 卡在背景，見下方「清掉殘留的 Chrome」 |
+| `Chrome 啟動失敗：等了 30 秒仍沒有 DevToolsActivePort` | 上一次的 Chrome 卡在背景，見下方「清掉殘留的 Chrome」 |
+| `Chrome 啟動失敗：Chrome 提早結束（…）` | 訊息後面會附上 Chrome 自己的 stderr，照著看。CI 容器裡少了 `--no-sandbox` 最常見 |
 | `找不到 Chrome/Edge` | 設 `CHROME_PATH` 指到 chrome.exe |
 | `ERR_UNSUPPORTED_ESM_URL_SCHEME` | import 用了 `D:/...`，改成 `file:///D:/...` |
 | 截圖整片深色，以為主題爛掉 | 先 `theme light`。headless 預設就是 dark |
