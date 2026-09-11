@@ -1,5 +1,5 @@
 /* ==========================================================================
-   波波特工與地宮掃雷 (Minesweeper: Tactical & Dungeon)
+   特工與地宮掃雷 (Minesweeper: Tactical & Dungeon)
    Core Engine, Audio Synthesizer, Touch UX & Persistence
    ========================================================================== */
 
@@ -32,9 +32,9 @@ const MODE_SKIN_MAP = {
 };
 
 const SKIN_TITLES = {
-  [SKINS.TACTICAL]: { text: '波波特工：戰術排雷', badge: 'Tactical Ops', label: '<span>🤖 戰術特工</span>' },
-  [SKINS.DUNGEON]: { text: '波波地宮：掃雷冒險', badge: 'Dungeon Sweeper', label: '<span>🗺️ 地宮探險</span>' },
-  [SKINS.CLASSIC]: { text: '波波掃雷：純粹經典', badge: 'Minesweeper', label: '<span>🖥️ 復古經典</span>' }
+  [SKINS.TACTICAL]: { text: '特工：戰術排雷', badge: 'Tactical Ops', label: '<span>🤖 戰術特工</span>' },
+  [SKINS.DUNGEON]: { text: '地宮：掃雷冒險', badge: 'Dungeon Sweeper', label: '<span>🗺️ 地宮探險</span>' },
+  [SKINS.CLASSIC]: { text: '掃雷：純粹經典', badge: 'Minesweeper', label: '<span>🖥️ 復古經典</span>' }
 };
 
 const ACTION_MODES = {
