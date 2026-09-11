@@ -323,19 +323,6 @@ html[data-theme="dark"] .icon-btn[aria-pressed="true"] {
   white-space: nowrap;
 }
 
-.main-title-badge {
-  font-size: 0.72rem;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--accent-primary);
-  color: #ffffff;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  font-family: var(--font-mono);
-  -webkit-text-fill-color: #ffffff;
-  white-space: nowrap;
-}
-
 /* --- 模式分段控制 --- */
 .mode-tabs {
   display: flex;
@@ -445,7 +432,6 @@ body[data-mode="blitz"] #tower-bar {
    ========================================================================== */
 
 .hud-panel {
-  position: relative;          /* .gain-float 的定位基準 */
   width: 100%;
   max-width: 440px;
   background: var(--bg-glass);
@@ -469,6 +455,7 @@ body[data-mode="blitz"] #tower-bar {
 }
 
 .score-box {
+  position: relative;          /* 「分數」格是 .gain-float 的定位基準 */
   flex: 1 1 0;
   min-width: 0;
   display: flex;
@@ -658,8 +645,12 @@ html[data-theme="dark"] .floor-badge {
    不需要額外的 class 開關，也不會有「動畫只播一次就再也不動」的老問題。 */
 .gain-float {
   position: absolute;
-  top: 6px;
-  right: 14px;
+  /* 貼在「分數」那一格的正上方往上飄：不蓋住分數本身，也不會跑到別格頭上。
+     水平置中靠 translateX(-50%)，所以 gainFloat 的每一格 keyframe
+     都必須把 -50% 帶著走，只寫 translateY 會讓它整個偏到右邊去。 */
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 5;
   pointer-events: none;
   font-family: var(--font-mono);
@@ -1773,10 +1764,10 @@ body[data-glyph-only] .tile-num {
 }
 
 @keyframes gainFloat {
-  0%   { transform: translateY(6px); opacity: 0; }
-  22%  { transform: translateY(0); opacity: 1; }
-  70%  { transform: translateY(-14px); opacity: 1; }
-  100% { transform: translateY(-26px); opacity: 0; }
+  0%   { transform: translate(-50%, 6px); opacity: 0; }
+  22%  { transform: translate(-50%, 0); opacity: 1; }
+  70%  { transform: translate(-50%, -14px); opacity: 1; }
+  100% { transform: translate(-50%, -26px); opacity: 0; }
 }
 
 @keyframes toastIn {
@@ -1795,11 +1786,6 @@ body[data-glyph-only] .tile-num {
   .main-title {
     font-size: 1.32rem;
     gap: 6px;
-  }
-
-  .main-title-badge {
-    font-size: 0.66rem;
-    padding: 2px 6px;
   }
 
   .hud-panel {

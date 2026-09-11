@@ -1329,9 +1329,8 @@ class Game2048 {
       statsBtn: byId('stats-btn'),
       helpBtn: byId('help-btn'),
 
-      // 標題（文字由 HTML 固定，JS 只補上動態 title 提示，不覆蓋內容）
+      // 標題（文字由 HTML 固定，JS 不覆蓋內容）
       titleText: byId('title-text'),
-      titleBadge: byId('title-badge'),
 
       // 模式與尺寸
       modeTabs: byId('mode-tabs'),
@@ -2460,7 +2459,6 @@ class Game2048 {
     _appSetAttr(this.el.targetEl, 'title', goal.isMilestone
       ? `階段目標 ${goal.value}，最終目標 ${this.currentTarget()}`
       : `本局目標 ${goal.value}`);
-    _appSetAttr(this.el.titleBadge, 'title', `本局目標 ${this.currentTarget()}`);
     this.refreshUndoUi();
     this.refreshBlitzHud();
     this.refreshTowerHud();
