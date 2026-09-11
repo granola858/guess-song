@@ -400,17 +400,22 @@
       text-shadow: 0 1px 0 var(--heading-shadow);
     }
 
-    /* 盤面與難度切換 (Slot Controls) */
+    /* 盤面與難度切換 (Slot Controls)
+       兩組並排成一列（不是上下兩列）：手機直向時這兩排各佔一行的話，
+       盤面就會被擠到需要捲動才看得完，併成一排才能一頁檢視。 */
     .control-stack {
       width: 100%;
+      max-width: 420px;
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
+      flex-direction: row;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 10px;
     }
 
     .control-group {
-      width: 100%;
+      flex: 1 1 0;
+      min-width: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -419,7 +424,6 @@
 
     .control-label {
       width: 100%;
-      max-width: 320px;
       color: var(--text-muted);
       font-size: 0.8rem;
       font-weight: 700;
@@ -429,7 +433,6 @@
     .toggle-container {
       display: flex;
       width: 100%;
-      max-width: 320px;
       gap: 4px;
       background-color: var(--surface-muted);
       padding: 4px;
@@ -438,14 +441,16 @@
 
     .mode-btn {
       background-color: transparent;
-      flex: 1;
+      flex: 1 1 0;
+      min-width: 0;
       border: none;
       border-radius: 6px;
       font-weight: bold;
-      font-size: 1rem;
-      padding: 8px 0;
+      font-size: 0.95rem;
+      padding: 8px 2px;
       cursor: pointer;
       color: var(--text-disabled);
+      white-space: nowrap;
     }
 
     .mode-btn.active {
@@ -861,6 +866,7 @@
       }
 
       .control-stack {
+        max-width: 390px;
         gap: 8px;
       }
 
@@ -873,9 +879,14 @@
         font-size: 0.74rem;
       }
 
+      .toggle-container {
+        gap: 2px;
+        padding: 3px;
+      }
+
       .mode-btn {
-        font-size: 0.92rem;
-        padding: 7px 0;
+        font-size: 0.84rem;
+        padding: 7px 1px;
       }
 
       .clue-cell {
@@ -936,6 +947,6 @@
       }
 
       .mode-btn {
-        padding: 6px 0;
+        padding: 6px 1px;
       }
     }
