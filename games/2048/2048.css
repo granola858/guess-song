@@ -35,6 +35,8 @@
   --dur-pulse: 0.9s;       /* 閃電模式剩餘時間告急脈動 */
   --dur-gain: 0.9s;        /* 得分浮動 */
   --dur-chain: 0.6s;       /* 連鎖徽章彈入 */
+  --dur-frost: 4.2s;       /* 爬塔冰塊的霜紋呼吸 */
+  --dur-smash: 1.2s;       /* 敲碎模式的「這顆可以點」提示脈動 */
   --dur-toast: 0.3s;
   --dur-modal: 0.25s;
   --dur-none: 0.01ms;      /* prefers-reduced-motion 的歸零時長 */
@@ -417,8 +419,24 @@ body[data-mode="blitz"] #undo-btn {
   display: none;
 }
 
-/* 經典模式沒有倒數列（HTML 預設也帶 hidden，這裡是模式切換時的保險） */
-body[data-mode="classic"] #blitz-bar {
+/* 爬塔同樣固定 4×4，盤面大小列一起收掉。
+   但爬塔「有」悔棋（而且還能用悔棋券加次數），所以刻意不連帶隱藏 #undo-btn。 */
+body[data-mode="tower"] #size-bar {
+  display: none;
+}
+
+/* 經典與爬塔都沒有倒數列（HTML 預設也帶 hidden，這裡是模式切換時的保險） */
+body[data-mode="classic"] #blitz-bar,
+body[data-mode="tower"] #blitz-bar {
+  display: none;
+}
+
+/* 反過來，爬塔狀態列只在爬塔模式出現。
+   這裡一律只寫「隱藏」不寫「顯示」：顯示由 JS 拿掉 hidden 屬性決定，
+   若這裡寫 body[data-mode="tower"] #tower-bar { display: flex }（特異度 1,1,1），
+   就會把 .tower-bar[hidden]（0,2,0）壓掉，hidden 屬性從此失效。 */
+body[data-mode="classic"] #tower-bar,
+body[data-mode="blitz"] #tower-bar {
   display: none;
 }
 
@@ -551,6 +569,87 @@ body[data-mode="classic"] #blitz-bar {
 }
 
 .chain-badge[hidden] {
+  display: none;
+}
+
+/* --- 爬塔狀態列 ---------------------------------------------------------
+   四顆膠囊：樓層 / 步數 / 金幣 / 復活權，視覺語言比照上面的 .blitz-bar。
+   共通外觀寫在 .tower-bar > span（子選擇器，不新增任何 class），
+   四個 id 各自的個性色再用自己的 class 覆蓋。
+   flex-wrap 是窄螢幕的保險：真的塞不下時整列換行，不會把 HUD 撐爆。 */
+.tower-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tower-bar[hidden] {
+  display: none;
+}
+
+.tower-bar > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+
+/* 樓層徽章：整列的主角，吃剩餘寬度並用強調色 */
+.floor-badge {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+}
+
+:root[data-theme="dark"] .floor-badge,
+html[data-theme="dark"] .floor-badge {
+  background: var(--bg-tertiary);
+}
+
+.step-counter {
+  color: var(--text-main);
+}
+
+/* 剩餘步數低於 20%：轉紅並脈動，沿用閃電模式的 lowTimePulse 與 --dur-pulse。
+   .is-low 由 JS 在更新 HUD 時依剩餘比例加／移除（與 .blitz-bar.is-low 同一套規矩）。 */
+.step-counter.is-low {
+  color: var(--danger);
+  border-color: var(--danger);
+  animation: lowTimePulse var(--dur-pulse) var(--ease-out) infinite;
+}
+
+.gold-counter {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.revive-counter {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 沒有復活權時整顆收起來。(0,2,0) 壓得過 .tower-bar > span 的 (0,1,1)。 */
+.revive-counter[hidden] {
   display: none;
 }
 
@@ -977,6 +1076,126 @@ html[data-theme="dark"] .tile[data-value="1024"] { --tile-bg: #17738f; --tile-fg
 :root[data-theme="dark"] .tile[data-value="2048"],
 html[data-theme="dark"] .tile[data-value="2048"] { --tile-bg: #d99c1f; --tile-fg: #3a2606; }
 
+/* --- E. 🧊 冰塊磚（爬塔模式） -----------------------------------------------
+   冰塊是 value 0 的特殊磚，hook 是「屬性」而不是 class：JS 在那顆 .tile 上寫
+   data-ice（有這個屬性就算，值寫什麼都行）。用屬性的兩個理由：
+     1. 冰塊的外觀 100% 由 CSS 決定，JS 不需要為了視覺再多背一個 class 名字；
+     2. 契約的雙向涵蓋測試會掃 class，少一個 class 就少一個對不上的風險。
+
+   為什麼整段要放在 §8 A~D 之後：
+   .tile[data-ice] 與 .tile[data-level="n"] 同為 (0,2,0)，同分時後寫者勝，
+   所以冰塊一定壓得過保底配色（不管 JS 有沒有順手寫 data-level="0"）。
+   深色主題的覆寫則同樣加上 :root[data-theme="dark"]（0,3,0）壓回來。
+
+   內容全藏：不管 JS 在 .tile-face 裡放了數字還是圖示，冰塊都只會顯示這裡畫的霜面，
+   所以「冰塊長什麼樣」只有 CSS 一份真相，不會兩邊各畫一半。 */
+.tile[data-ice] {
+  --tile-bg: linear-gradient(150deg, #eaf7ff 0%, #c3e4f7 46%, #a4d2ef 100%);
+  --tile-fg: #245c7d;
+  --num-fs: 0.42;
+}
+
+.tile[data-ice] .tile-face {
+  /* 霜紋質感：兩組交錯的細斜紋 + 左上高光，疊在冰藍底色上。
+     半透明只發生在「磚面內部的漸層」，.tile 本身的 opacity 一律不碰。 */
+  background-color: #cde8f8;
+  background-image:
+    linear-gradient(152deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0) 44%),
+    repeating-linear-gradient(58deg, rgba(255, 255, 255, 0.52) 0 2px, rgba(255, 255, 255, 0) 2px 9px),
+    repeating-linear-gradient(-58deg, rgba(255, 255, 255, 0.30) 0 2px, rgba(255, 255, 255, 0) 2px 13px),
+    linear-gradient(150deg, #eaf7ff 0%, #c3e4f7 46%, #a4d2ef 100%);
+  color: var(--tile-fg);
+  /* 內圈白框 + 底部的厚度陰影 ＝「一塊實心冰」而不是「一張藍卡片」 */
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.75),
+    inset 0 -7px 14px rgba(52, 122, 160, 0.32),
+    inset 0 5px 10px rgba(255, 255, 255, 0.55),
+    0 2px 6px rgba(40, 90, 120, 0.32);
+  /* 「推不動」的第一眼線索：滑鼠停上去就是禁止符號 */
+  cursor: not-allowed;
+}
+
+/* 雪花印記。用 \2744 的碼位跳脫而不是直接貼字元，
+   CSS 檔沒有 @charset 時才不會依賴外層文件的編碼推斷。 */
+.tile[data-ice] .tile-face::after {
+  content: '\2744';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  pointer-events: none;
+  font-size: calc(0.46 * var(--tile-len));
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(30, 84, 116, 0.55);
+  animation: frostBreathe var(--dur-frost) var(--ease-out) infinite;
+}
+
+/* 冰塊沒有面值，數字與進化圖示一律不顯示。
+   (0,3,0) 壓得過 §9 的 html[data-skin="..."] .tile-num（0,2,1）
+   與 body[data-glyph-only] .tile-glyph（0,2,1）。 */
+.tile[data-ice] .tile-num,
+.tile[data-ice] .tile-glyph {
+  display: none;
+}
+
+/* 深色主題：冰塊改成夜色寒潭，白霜換成低飽和的冷光 */
+:root[data-theme="dark"] .tile[data-ice],
+html[data-theme="dark"] .tile[data-ice] {
+  --tile-bg: linear-gradient(150deg, #41708c 0%, #2a536f 48%, #1b3c52 100%);
+  --tile-fg: #d8eefc;
+}
+
+:root[data-theme="dark"] .tile[data-ice] .tile-face,
+html[data-theme="dark"] .tile[data-ice] .tile-face {
+  background-color: #2c566f;
+  background-image:
+    linear-gradient(152deg, rgba(226, 245, 255, 0.34) 0%, rgba(226, 245, 255, 0) 44%),
+    repeating-linear-gradient(58deg, rgba(226, 245, 255, 0.24) 0 2px, rgba(226, 245, 255, 0) 2px 9px),
+    repeating-linear-gradient(-58deg, rgba(226, 245, 255, 0.14) 0 2px, rgba(226, 245, 255, 0) 2px 13px),
+    linear-gradient(150deg, #41708c 0%, #2a536f 48%, #1b3c52 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(198, 232, 250, 0.36),
+    inset 0 -7px 14px rgba(0, 0, 0, 0.42),
+    inset 0 5px 10px rgba(198, 232, 250, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark"] .tile[data-ice] .tile-face::after,
+html[data-theme="dark"] .tile[data-ice] .tile-face::after {
+  color: rgba(216, 238, 252, 0.86);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* --- F. 🔨 敲碎模式 ---------------------------------------------------------
+   JS 在 #tile-layer 上加 .is-smashing，玩家點任一顆磚（含冰塊）把它敲掉。
+   提示畫在 .tile-face::before 而不是 .tile-face 自己：
+   .tile-face 的 animation 已經被 tilePop / tileSpawn 佔用，
+   animation 是單一屬性、會整份互相覆寫，偽元素才各自獨立。
+   這一段放在冰塊之後，cursor 才蓋得過冰塊的 not-allowed（同為 0,3,0，後寫者勝）。 */
+.tile-layer.is-smashing {
+  cursor: crosshair;
+}
+
+.tile-layer.is-smashing .tile {
+  cursor: pointer;
+}
+
+.tile-layer.is-smashing .tile-face {
+  cursor: pointer;
+}
+
+.tile-layer.is-smashing .tile-face::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 2px dashed var(--danger);
+  animation: smashHint var(--dur-smash) var(--ease-out) infinite;
+}
+
 /* ==========================================================================
    9. 皮膚：數字 / 進化 / 純圖示
    --------------------------------------------------------------------------
@@ -1132,7 +1351,12 @@ body[data-glyph-only] .tile-num {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 瀏海／圓角機的安全區：商店卡片是四邊貼滿的格線，橫放時最容易被切到，
+     所以四邊都取 max(16px, 安全區)。不支援 env() 的瀏覽器會整條宣告失效，
+     由上一行的 padding: 16px 接手。 */
   padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   z-index: 1000;
   opacity: 0;
   pointer-events: none;
@@ -1333,6 +1557,125 @@ body[data-glyph-only] .tile-num {
   margin-bottom: 2px;
 }
 
+/* --- 層間商店（爬塔模式） ------------------------------------------------
+   視覺骨架借自掃雷地宮的商店，配色整組換成 2048 的暖棕系。
+   卡片本體由 JS 依 SHOP_ITEMS 生成，HTML 只留空的 #shop-items 容器，
+   所以這裡的 .shop-card / .shop-buy-btn / .icon / .title / .desc / .price
+   全部是「JS 必須照樣輸出」的約定，不能單方面改名。 */
+.shop-lead {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+/* .modal-body strong 是 (0,1,1)，光靠 .shop-gold (0,1,0) 蓋不過去，
+   所以刻意寫成兩段 (0,2,0)。 */
+.modal-body .shop-gold {
+  font-family: var(--font-mono);
+  color: var(--warning);
+  font-weight: 800;
+}
+
+.shop-items-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.shop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px 10px;
+  text-align: center;
+  background: var(--bg-primary);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.shop-card:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.shop-card .icon {
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.shop-card .title {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.shop-card .desc {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  min-height: 2.9em;      /* 六張卡的說明長短不一，先鎖高度讓按鈕齊平 */
+}
+
+.shop-card .price {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--warning);
+}
+
+.shop-buy-btn {
+  width: 100%;
+  margin-top: 2px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--dur-fast) var(--ease-out);
+}
+
+.shop-buy-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.shop-buy-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.shop-buy-btn:focus-visible {
+  outline: 3px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* 買不起、或 max 已經買滿：按鈕與整張卡一起變灰。
+   兩種情況都只靠 disabled 屬性表達，不需要額外的 class。 */
+.shop-buy-btn:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+
+.shop-card:has(.shop-buy-btn:disabled) {
+  opacity: 0.55;
+}
+
+.shop-card:has(.shop-buy-btn:disabled):hover {
+  border-color: var(--border-color);
+  transform: none;
+  box-shadow: none;
+}
+
 /* ==========================================================================
    12. Toast 訊息
    ========================================================================== */
@@ -1408,6 +1751,21 @@ body[data-glyph-only] .tile-num {
   50%      { opacity: 0.55; }
 }
 
+/* 冰塊的雪花呼吸：畫在 .tile[data-ice] .tile-face::after 上。
+   偽元素有自己的 transform，動到它不會碰到 .tile-face 的 scale，
+   更不可能碰到 .tile 的位移。 */
+@keyframes frostBreathe {
+  0%, 100% { transform: scale(0.94); opacity: 0.78; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+
+/* 敲碎模式的「這顆可以點」提示：同樣只動 .tile-face::before 的透明度，
+   讓虛線外框一明一暗，不搶任何一層的 transform。 */
+@keyframes smashHint {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
 @keyframes chainPop {
   0%   { transform: scale(0.4); opacity: 0; }
   60%  { transform: scale(1.15); opacity: 1; }
@@ -1455,6 +1813,10 @@ body[data-glyph-only] .tile-num {
   .modal-box {
     padding: 18px 16px;
   }
+
+  .shop-items-grid {
+    gap: 8px;
+  }
 }
 
 @media (max-width: 420px) {
@@ -1463,9 +1825,50 @@ body[data-glyph-only] .tile-num {
     padding: 10px 10px 96px;
   }
 
+  /* 三個模式分頁擠在 400px 內：左右 padding 先讓，字級維持可讀 */
   .mode-tab-btn {
-    padding: 8px 8px;
+    padding: 8px 5px;
     font-size: 0.82rem;
+    gap: 4px;
+  }
+
+  /* 爬塔狀態列：膠囊縮一號，四顆仍排得下一行；真的塞不下才靠 flex-wrap 換行 */
+  .tower-bar {
+    gap: 5px;
+  }
+
+  .tower-bar > span {
+    padding: 3px 7px;
+    font-size: 0.72rem;
+    min-height: 24px;
+  }
+
+  .floor-badge {
+    font-size: 0.74rem;
+  }
+
+  /* 商店維持兩欄（一欄會讓彈窗變得很長），改縮卡片內距與字級 */
+  .shop-card {
+    padding: 10px 7px 8px;
+    gap: 3px;
+  }
+
+  .shop-card .icon {
+    font-size: 1.35rem;
+  }
+
+  .shop-card .title {
+    font-size: 0.84rem;
+  }
+
+  .shop-card .desc {
+    font-size: 0.68rem;
+    min-height: 3.2em;
+  }
+
+  .shop-buy-btn {
+    padding: 7px 4px;
+    font-size: 0.75rem;
   }
 
   .size-btn {
@@ -1553,6 +1956,73 @@ body[data-glyph-only] .tile-num {
   .chain-badge {
     font-size: 0.66rem;
     padding: 2px 6px;
+  }
+
+  /* 三個分頁在 360px 以下必須再讓一次，否則「🎯 經典無盡」會被切字 */
+  .mode-tab-btn {
+    padding: 8px 3px;
+    font-size: 0.74rem;
+    gap: 3px;
+  }
+
+  .tower-bar {
+    gap: 4px;
+  }
+
+  .tower-bar > span {
+    padding: 2px 6px;
+    font-size: 0.67rem;
+    min-height: 22px;
+  }
+
+  .floor-badge {
+    font-size: 0.7rem;
+  }
+
+  /* 360px 以下兩欄卡片只剩約 130px，說明文字會擠成一團，改單欄 */
+  .shop-items-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .shop-card {
+    /* 單欄時改成橫向排版：圖示在左，文字與按鈕在右，才不會一張卡佔掉半個螢幕 */
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      'icon title'
+      'icon desc'
+      'icon price'
+      'buy  buy';
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 10px;
+  }
+
+  .shop-card .icon {
+    grid-area: icon;
+    font-size: 1.7rem;
+  }
+
+  .shop-card .title {
+    grid-area: title;
+  }
+
+  .shop-card .desc {
+    grid-area: desc;
+    min-height: 0;
+  }
+
+  .shop-card .price {
+    grid-area: price;
+  }
+
+  .shop-buy-btn {
+    grid-area: buy;
+    margin-top: 6px;
   }
 }
 

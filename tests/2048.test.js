@@ -50,6 +50,15 @@ const {
   PREF_KEY,
   SKINS,
   EVOLVE_GLYPHS,
+  TOWER_FLOORS,
+  SHOP_ITEMS,
+  ICE_VALUE,
+  REVIVE_STEPS,
+  isIce,
+  placeIce,
+  towerFloor,
+  sacrificeTiles,
+  shuffleTiles,
   Game2048
 } = core;
 
@@ -65,7 +74,10 @@ const EXPECTED_EXPORTS = [
   'createRng', 'createInitialGrid', 'buildLines', 'computeMove', 'spawnTile', 'canMove',
   'maxTile', 'isWin', 'isGameOver', 'levelOf', 'gridToValues', 'gridFromValues', 'valuesFromRows',
   'SWIPE', 'lockSwipeAxis', 'resolveSwipe',
-  'SAVE_KEY', 'STATS_KEY', 'PREF_KEY', 'SKINS', 'EVOLVE_GLYPHS', 'Game2048'
+  'SAVE_KEY', 'STATS_KEY', 'PREF_KEY', 'SKINS', 'EVOLVE_GLYPHS', 'Game2048',
+  // 爬塔模式（爬塔契約第 2 節：這九個符號要「加進 module.exports 的精確集合」）
+  'TOWER_FLOORS', 'SHOP_ITEMS', 'ICE_VALUE', 'REVIVE_STEPS',
+  'isIce', 'placeIce', 'towerFloor', 'sacrificeTiles', 'shuffleTiles'
 ];
 
 // ---------------------------------------------------------------------------
@@ -148,6 +160,92 @@ function sortMerges(merges) {
   return Array.from(merges).map(m => ({
     keepId: m.keepId, to: m.to, value: m.value
   })).sort((a, b) => a.keepId - b.keepId);
+}
+
+// ---------------------------------------------------------------------------
+// 冰塊專用的小工具（一樣刻意不借用實作的 gridFromValues，
+// 冰塊磚一律由測試自己組，才驗得到 gridFromValues 有沒有把 -1 還原成冰塊）
+// ---------------------------------------------------------------------------
+
+/** 一顆冰塊磚：爬塔契約第 2 節「也是一顆 Tile，但 value 為 0 且帶 ice 旗標」 */
+function iceTile(id) {
+  return { id, value: 0, ice: true };
+}
+
+/** 讀出盤面的面值陣列；空格 0、冰塊 ICE_VALUE(-1) */
+function readCells(grid) {
+  return Array.from(grid, tile => {
+    if (!tile) return 0;
+    if (tile.ice === true) return ICE_VALUE;
+    return typeof tile.value === 'number' ? tile.value : 0;
+  });
+}
+
+/** 由 valuesFromRows 的列字串建盤面；-1 建冰塊。id 依格號由 startId 起依序配發 */
+function gridOfIceRows(rows, startId) {
+  const values = valuesFromRows(rows);
+  const grid = new Array(values.length).fill(null);
+  let id = startId === undefined ? 1 : startId;
+  values.forEach((v, i) => {
+    if (v === 0) return;
+    grid[i] = (v === ICE_VALUE) ? iceTile(id) : { id, value: v };
+    id += 1;
+  });
+  return grid;
+}
+
+/**
+ * 把「靠牆端 → 遠端」的序列鋪到第 0 條線上；-1 建冰塊。
+ * id 固定是 101 + k（k 是線上的位置），下面所有手算期望值都靠這條規則對照。
+ */
+function gridFromIceLine(n, dir, lineValues) {
+  const grid = new Array(n * n).fill(null);
+  lineValues.forEach((v, k) => {
+    if (v === 0) return;
+    const idx = indexOnLine(n, dir, k);
+    grid[idx] = (v === ICE_VALUE) ? iceTile(101 + k) : { id: 101 + k, value: v };
+  });
+  return grid;
+}
+
+/** 依「靠牆端 → 遠端」讀回第 0 條線的面值；冰塊回 ICE_VALUE */
+function readIceLine(n, dir, grid) {
+  const cells = readCells(grid);
+  const out = [];
+  for (let k = 0; k < n; k += 1) out.push(cells[indexOnLine(n, dir, k)]);
+  return out;
+}
+
+/** 依「靠牆端 → 遠端」讀回第 0 條線的 id */
+function readLineIds(n, dir, grid) {
+  const out = [];
+  for (let k = 0; k < n; k += 1) {
+    const tile = grid[indexOnLine(n, dir, k)];
+    out.push(tile && typeof tile.id === 'number' ? tile.id : 0);
+  }
+  return out;
+}
+
+/** 線上位置寫的 merges 期望值 → 格號版本 */
+function expectMerges(n, dir, list) {
+  return list.map(m => ({
+    keepId: 101 + m.keepK, to: indexOnLine(n, dir, m.toK), value: m.value
+  })).sort((a, b) => a.keepId - b.keepId);
+}
+
+/** 線上位置寫的 moves 期望值 → 格號版本 */
+function expectMoves(n, dir, list) {
+  return list.map(m => ({
+    id: 101 + m.k,
+    from: indexOnLine(n, dir, m.k),
+    to: indexOnLine(n, dir, m.toK),
+    dying: m.dying
+  })).sort((a, b) => a.id - b.id);
+}
+
+/** 盤面的快照（磚塊參考 / 面值 / id / ice 旗標），用來檢查有沒有被 mutate */
+function snapshotGrid(grid) {
+  return grid.map(t => (t ? { id: t.id, value: t.value, ice: t.ice === true } : null));
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +398,58 @@ function makeApp(extra) {
     el: {}
   }, extra);
   return app;
+}
+
+/** 爬塔存檔（爬塔契約第 4 節）的道具欄位，六項齊全且都是 0 */
+function emptyItems(over) {
+  return Object.assign(
+    { smash: 0, undo: 0, shuffle: 0, seed: 0, melt: 0, revive: 0 }, over
+  );
+}
+
+/** 爬塔狀態物件：欄位與爬塔契約第 4 節的存檔 tower 區塊逐字相同 */
+function towerStateOf(over) {
+  const state = Object.assign({
+    floor: 1,
+    steps: 0,
+    gold: 0,
+    items: emptyItems(),
+    seedPending: false,
+    meltNext: 0
+  }, over);
+  state.items = emptyItems(state.items);
+  return state;
+}
+
+/**
+ * 爬塔模式的假 Game2048。
+ * 爬塔契約沒有明寫「記憶體裡的爬塔狀態」叫什麼，
+ * 但第 4 節的存檔結構只給了 tower: { floor, steps, gold, items, seedPending, meltNext }，
+ * 所以測試一律以 app.tower 這個同形物件為準。
+ */
+function makeTowerApp(tower, extra) {
+  return makeApp(Object.assign({
+    mode: MODES.TOWER,
+    size: 4,
+    n: 4,
+    tower: towerStateOf(tower)
+  }, extra));
+}
+
+/**
+ * 關掉實例可能起起來的計時器。
+ * 例如載入閃電模式存檔會起一個每 100ms 的倒數 interval，
+ * 不關掉的話整份測試會被那個 interval 拖到倒數結束才收工。
+ */
+function stopTimers(app) {
+  Object.keys(app).forEach(key => {
+    if (!/timer|interval|raf/i.test(key)) return;
+    const handle = app[key];
+    if (handle === null || handle === undefined) return;
+    try { clearInterval(handle); } catch (err) { /* 假環境沒有也無所謂 */ }
+    try { clearTimeout(handle); } catch (err) { /* 同上 */ }
+    app[key] = null;
+  });
 }
 
 /**
@@ -536,7 +686,8 @@ test('2048.js 可被 require，且 module.exports 是契約第 4 節的精確集
   [
     'createRng', 'createInitialGrid', 'buildLines', 'computeMove', 'spawnTile', 'canMove',
     'maxTile', 'isWin', 'isGameOver', 'levelOf', 'gridToValues', 'gridFromValues',
-    'valuesFromRows', 'lockSwipeAxis', 'resolveSwipe'
+    'valuesFromRows', 'lockSwipeAxis', 'resolveSwipe',
+    'isIce', 'placeIce', 'towerFloor', 'sacrificeTiles', 'shuffleTiles'
   ].forEach(name => {
     assert.equal(typeof core[name], 'function', `${name} 必須是函式`);
   });
@@ -578,7 +729,7 @@ test('DIR / DIR_NAMES / MODES 的值與契約完全相同', () => {
   assert.equal(DIR_NAMES[DIR.DOWN], 'down');
   assert.equal(DIR_NAMES[DIR.LEFT], 'left');
 
-  assert.deepEqual(MODES, { CLASSIC: 'classic', BLITZ: 'blitz' });
+  assert.deepEqual(MODES, { CLASSIC: 'classic', BLITZ: 'blitz', TOWER: 'tower' });
   assert.deepEqual(SKINS, { NUMBER: 'number', EVOLVE: 'evolve' });
 
   assert.equal(SAVE_KEY, 'g2048_save_v1');
@@ -2009,6 +2160,1043 @@ test('emptyBucket 含 milestoneHits 且初值為 0', () => {
 });
 
 // ---------------------------------------------------------------------------
+// H. 冰塊（爬塔契約第 2 節的 CORE 改動）
+// ---------------------------------------------------------------------------
+
+test('ICE_VALUE / REVIVE_STEPS 與契約相同，valuesFromRows 認得 -1，isIce 判定正確', () => {
+  assert.equal(ICE_VALUE, -1, 'ICE_VALUE 必須是 -1（gridToValues / 存檔的冰塊哨兵值）');
+  assert.equal(REVIVE_STEPS, 30, '復活權續的步數必須是 30');
+
+  // 下面所有冰塊局面都靠 valuesFromRows 讀 -1，先把這件事釘死
+  assert.deepEqual(valuesFromRows(['2 -1 . 4']), [2, -1, 0, 4],
+    'valuesFromRows 必須把 -1 原樣讀成 ICE_VALUE（不得被當成非法值吃掉）');
+  assert.deepEqual(valuesFromRows(['2,-1,0,4']), [2, -1, 0, 4], '逗號分隔同樣要認得 -1');
+  assert.deepEqual(valuesFromRows(['2 -1', '-1 4']), [2, -1, -1, 4]);
+
+  assert.equal(isIce(null), false, 'isIce 必須 null 安全');
+  assert.equal(isIce(undefined), false, 'isIce 必須容忍 undefined');
+  assert.equal(isIce({ id: 1, value: 2 }), false, '一般磚不是冰塊');
+  assert.equal(isIce({ id: 1, value: 0 }), false, '只有 value 0 而沒有 ice 旗標不算冰塊');
+  assert.equal(isIce(iceTile(7)), true, '{ value: 0, ice: true } 必須判定為冰塊');
+  assert.equal(isIce({ id: 1, value: 0, ice: false }), false, 'ice: false 不是冰塊');
+});
+
+test('回歸：沒有冰塊時 computeMove 的每一個欄位都與改動前完全相同', () => {
+  // 契約第 2 節的七條驗收用例，這次連 next 的 id、moves、merges 都逐欄位釘死。
+  // 線上位置 k 的磚 id 固定是 101 + k（見 gridFromIceLine）。
+  const CASES = [
+    {
+      input: [2, 2, 2, 2], expect: [4, 4, 0, 0], ids: [101, 103, 0, 0],
+      gained: 8, mergeCount: 2, maxMerged: 4,
+      merges: [{ keepK: 0, toK: 0, value: 4 }, { keepK: 2, toK: 1, value: 4 }],
+      moves: [
+        { k: 1, toK: 0, dying: true }, { k: 2, toK: 1, dying: false }, { k: 3, toK: 1, dying: true }
+      ]
+    },
+    {
+      input: [4, 4, 4, 4], expect: [8, 8, 0, 0], ids: [101, 103, 0, 0],
+      gained: 16, mergeCount: 2, maxMerged: 8,
+      merges: [{ keepK: 0, toK: 0, value: 8 }, { keepK: 2, toK: 1, value: 8 }],
+      moves: [
+        { k: 1, toK: 0, dying: true }, { k: 2, toK: 1, dying: false }, { k: 3, toK: 1, dying: true }
+      ]
+    },
+    {
+      input: [2, 2, 2, 0], expect: [4, 2, 0, 0], ids: [101, 103, 0, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 0, toK: 0, value: 4 }],
+      moves: [{ k: 1, toK: 0, dying: true }, { k: 2, toK: 1, dying: false }]
+    },
+    {
+      input: [2, 2, 4, 0], expect: [4, 4, 0, 0], ids: [101, 103, 0, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 0, toK: 0, value: 4 }],
+      moves: [{ k: 1, toK: 0, dying: true }, { k: 2, toK: 1, dying: false }]
+    },
+    {
+      input: [4, 2, 2, 0], expect: [4, 4, 0, 0], ids: [101, 102, 0, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 1, toK: 1, value: 4 }],
+      moves: [{ k: 2, toK: 1, dying: true }]
+    },
+    {
+      input: [2, 0, 2, 4], expect: [4, 4, 0, 0], ids: [101, 104, 0, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 0, toK: 0, value: 4 }],
+      moves: [{ k: 2, toK: 0, dying: true }, { k: 3, toK: 1, dying: false }]
+    },
+    {
+      input: [0, 0, 0, 2], expect: [2, 0, 0, 0], ids: [104, 0, 0, 0],
+      gained: 0, mergeCount: 0, maxMerged: 0,
+      merges: [],
+      moves: [{ k: 3, toK: 0, dying: false }]
+    }
+  ];
+
+  ALL_DIRS().forEach(([dirName, dir]) => {
+    CASES.forEach(c => {
+      const label = `${dirName} [${c.input.join(',')}]`;
+      const plan = computeMove(gridFromIceLine(4, dir, c.input), 4, dir);
+
+      assert.equal(plan.changed, true, `${label}：盤面確實有變化`);
+      assert.deepEqual(readIceLine(4, dir, plan.next), c.expect,
+        `${label} 應得 [${c.expect.join(',')}]`);
+      assert.deepEqual(readCells(plan.next), expectedValuesFromLine(4, dir, c.expect),
+        `${label}：其他格子不得被污染`);
+      assert.deepEqual(readLineIds(4, dir, plan.next), c.ids,
+        `${label}：存活者的 id 必須是 [${c.ids.join(',')}]`);
+      assert.equal(plan.gained, c.gained, `${label}：gained 應為 ${c.gained}`);
+      assert.equal(plan.mergeCount, c.mergeCount, `${label}：mergeCount 應為 ${c.mergeCount}`);
+      assert.equal(plan.maxMerged, c.maxMerged, `${label}：maxMerged 應為 ${c.maxMerged}`);
+      assert.deepEqual(sortMerges(plan.merges), expectMerges(4, dir, c.merges),
+        `${label}：merges 逐欄位必須完全相同`);
+      assert.deepEqual(sortMoves(plan.moves), expectMoves(4, dir, c.moves),
+        `${label}：moves 逐欄位必須完全相同`);
+    });
+  });
+
+  // 3×3 的合併鎖也要原樣保留
+  ALL_DIRS().forEach(([dirName, dir]) => {
+    const plan = computeMove(gridFromIceLine(3, dir, [2, 2, 2]), 3, dir);
+    assert.deepEqual(readIceLine(3, dir, plan.next), [4, 2, 0],
+      `${dirName} 3×3 [2,2,2] 必須得到 [4,2]`);
+    assert.deepEqual(readLineIds(3, dir, plan.next), [101, 103, 0]);
+    assert.deepEqual(sortMerges(plan.merges), expectMerges(3, dir, [{ keepK: 0, toK: 0, value: 4 }]));
+    assert.deepEqual(sortMoves(plan.moves), expectMoves(3, dir, [
+      { k: 1, toK: 0, dying: true }, { k: 2, toK: 1, dying: false }
+    ]));
+    assert.equal(plan.gained, 4);
+    assert.equal(plan.mergeCount, 1);
+  });
+});
+
+test('冰塊不會移動也不會合併（兩顆冰塊相鄰也不得合成一顆）', () => {
+  // 線上只有一顆冰塊：四個方向都不得把它推向牆
+  ALL_DIRS().forEach(([name, dir]) => {
+    const plan = computeMove(gridFromIceLine(4, dir, [0, 0, ICE_VALUE, 0]), 4, dir);
+    assert.equal(plan.changed, false, `${name}：盤面只有一顆冰塊，不該有任何變化`);
+    assert.deepEqual(readIceLine(4, dir, plan.next), [0, 0, ICE_VALUE, 0],
+      `${name}：冰塊必須待在原地，不得被滑到牆邊`);
+    assert.deepEqual(readLineIds(4, dir, plan.next), [0, 0, 103, 0],
+      `${name}：冰塊的 id 必須跟著留在原位`);
+    const kept = plan.next[indexOnLine(4, dir, 2)];
+    assert.equal(kept.ice, true, `${name}：搬運過程不得把 ice 旗標弄丟`);
+    assert.equal(kept.value, 0, `${name}：冰塊的 value 必須維持 0`);
+    assert.equal(plan.moves.length, 0, `${name}：冰塊不得列入 moves`);
+    assert.equal(plan.merges.length, 0);
+    assert.equal(plan.gained, 0);
+  });
+
+  // 兩顆冰塊 value 都是 0，絕不能被判成「同值可合併」
+  ALL_DIRS().forEach(([name, dir]) => {
+    [[ICE_VALUE, ICE_VALUE, 2, 0], [ICE_VALUE, 0, ICE_VALUE, 0]].forEach(input => {
+      const plan = computeMove(gridFromIceLine(4, dir, input), 4, dir);
+      assert.deepEqual(readIceLine(4, dir, plan.next), input,
+        `${name} [${input.join(',')}]：冰塊與其後的磚都不該動`);
+      assert.equal(plan.merges.length, 0, `${name} [${input.join(',')}]：冰塊不得合併`);
+      assert.equal(plan.gained, 0, `${name} [${input.join(',')}]：冰塊不得產生分數`);
+      assert.equal(plan.changed, false, `${name} [${input.join(',')}]：不該有任何變化`);
+    });
+  });
+
+  // 整盤：冰塊在格號 5 與 10，四個方向滑完都要留在原格
+  const rows = ['2 0 4 0', '0 -1 0 8', '0 0 -1 0', '2 0 0 4'];
+  ALL_DIRS().forEach(([name, dir]) => {
+    const grid = gridOfIceRows(rows, 1);
+    const plan = computeMove(grid, 4, dir);
+    [5, 10].forEach(i => {
+      assert.ok(plan.next[i] && plan.next[i].ice === true,
+        `${name}：格號 ${i} 的冰塊不得離開原位`);
+      assert.equal(plan.next[i].id, grid[i].id, `${name}：冰塊的 id 必須維持不變`);
+      assert.equal(plan.next[i].value, 0, `${name}：冰塊的 value 必須維持 0`);
+    });
+    assert.equal(readCells(plan.next).filter(v => v === ICE_VALUE).length, 2,
+      `${name}：冰塊數量不得改變`);
+    Array.from(plan.moves).forEach(m => {
+      assert.equal([5, 10].indexOf(m.from), -1, `${name}：moves 不得包含冰塊（from ${m.from}）`);
+      assert.equal([5, 10].indexOf(m.to), -1, `${name}：不得有磚塊被搬到冰塊佔住的格號 ${m.to}`);
+    });
+  });
+});
+
+test('冰塊把一條線切成兩段，兩段各自獨立滑動與合併', () => {
+  // 手算（以向左為例，線上位置 k 的 id 是 101 + k）：
+  //   [2,冰,2,2] → k0 佔 pos0；k1 冰塊回原位、writeIdx 跳到 2；
+  //                k2 的前一格是冰塊不能合併 → 留在 pos2；k3 與 pos2 同值 → 併成 4
+  //              → [2, 冰, 4, 空]（絕不是 [4, 冰, 2, 空]）
+  const CASES = [
+    {
+      input: [2, ICE_VALUE, 2, 2], expect: [2, ICE_VALUE, 4, 0], ids: [101, 102, 103, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 2, toK: 2, value: 4 }],
+      moves: [{ k: 3, toK: 2, dying: true }],
+      why: '冰塊左邊的 2 不得跨過冰塊參與合併'
+    },
+    {
+      input: [ICE_VALUE, 2, 2, 2], expect: [ICE_VALUE, 4, 2, 0], ids: [101, 102, 104, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 1, toK: 1, value: 4 }],
+      moves: [{ k: 2, toK: 1, dying: true }, { k: 3, toK: 2, dying: false }],
+      why: '靠牆端是冰塊時，整段往冰塊後面靠齊而不是往牆靠齊'
+    },
+    {
+      input: [2, 2, ICE_VALUE, 2], expect: [4, 0, ICE_VALUE, 2], ids: [101, 0, 103, 104],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 0, toK: 0, value: 4 }],
+      moves: [{ k: 1, toK: 0, dying: true }],
+      why: '冰塊後面那顆不得越過冰塊往牆邊靠'
+    },
+    {
+      input: [0, ICE_VALUE, 2, 2], expect: [0, ICE_VALUE, 4, 0], ids: [0, 102, 103, 0],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 2, toK: 2, value: 4 }],
+      moves: [{ k: 3, toK: 2, dying: true }],
+      why: '牆邊雖然是空的，冰塊後面的磚也不得滑過去'
+    },
+    {
+      input: [ICE_VALUE, 0, 2, 0], expect: [ICE_VALUE, 2, 0, 0], ids: [101, 103, 0, 0],
+      gained: 0, mergeCount: 0, maxMerged: 0,
+      merges: [],
+      moves: [{ k: 2, toK: 1, dying: false }],
+      why: '冰塊之後的磚只能靠到冰塊後面第一格'
+    },
+    {
+      input: [2, 2, ICE_VALUE, 4], expect: [4, 0, ICE_VALUE, 4], ids: [101, 0, 103, 104],
+      gained: 4, mergeCount: 1, maxMerged: 4,
+      merges: [{ keepK: 0, toK: 0, value: 4 }],
+      moves: [{ k: 1, toK: 0, dying: true }],
+      why: '合併出來的 4 不得跨過冰塊再跟另一顆 4 合併'
+    }
+  ];
+
+  ALL_DIRS().forEach(([dirName, dir]) => {
+    CASES.forEach(c => {
+      const label = `${dirName} [${c.input.join(',')}]`;
+      const plan = computeMove(gridFromIceLine(4, dir, c.input), 4, dir);
+
+      assert.deepEqual(readIceLine(4, dir, plan.next), c.expect,
+        `${label} 應得 [${c.expect.join(',')}]：${c.why}`);
+      assert.deepEqual(readCells(plan.next), expectedValuesFromLine(4, dir, c.expect),
+        `${label}：其他格子不得被污染`);
+      assert.deepEqual(readLineIds(4, dir, plan.next), c.ids, `${label}：id 分佈必須正確`);
+      assert.equal(plan.changed, true, `${label}：盤面確實有變化`);
+      assert.equal(plan.gained, c.gained, `${label}：gained 應為 ${c.gained}`);
+      assert.equal(plan.mergeCount, c.mergeCount, `${label}：mergeCount 應為 ${c.mergeCount}`);
+      assert.equal(plan.maxMerged, c.maxMerged, `${label}：maxMerged 應為 ${c.maxMerged}`);
+      assert.deepEqual(sortMerges(plan.merges), expectMerges(4, dir, c.merges), `${label}：merges`);
+      assert.deepEqual(sortMoves(plan.moves), expectMoves(4, dir, c.moves), `${label}：moves`);
+    });
+  });
+
+  // 5×5：冰塊在正中央，兩側各自合併成 4
+  ALL_DIRS().forEach(([dirName, dir]) => {
+    const plan = computeMove(gridFromIceLine(5, dir, [2, 2, ICE_VALUE, 2, 2]), 5, dir);
+    assert.deepEqual(readIceLine(5, dir, plan.next), [4, 0, ICE_VALUE, 4, 0],
+      `${dirName} 5×5 [2,2,冰,2,2] 兩段必須各自合併成 4`);
+    assert.deepEqual(readLineIds(5, dir, plan.next), [101, 0, 103, 104, 0]);
+    assert.equal(plan.gained, 8);
+    assert.equal(plan.mergeCount, 2);
+    assert.equal(plan.maxMerged, 4);
+    assert.deepEqual(sortMerges(plan.merges), expectMerges(5, dir, [
+      { keepK: 0, toK: 0, value: 4 }, { keepK: 3, toK: 3, value: 4 }
+    ]));
+    assert.deepEqual(sortMoves(plan.moves), expectMoves(5, dir, [
+      { k: 1, toK: 0, dying: true }, { k: 4, toK: 3, dying: true }
+    ]));
+  });
+});
+
+test('冰塊兩側的磚絕對不會跨過冰塊合併', () => {
+  // 完全不動的局面
+  const FROZEN = [
+    [2, ICE_VALUE, 2, 0],
+    [0, ICE_VALUE, 2, 0],
+    [4, ICE_VALUE, 4, 0],
+    [2, ICE_VALUE, ICE_VALUE, 2],
+    [8, 4, ICE_VALUE, 8]
+  ];
+  ALL_DIRS().forEach(([name, dir]) => {
+    FROZEN.forEach(input => {
+      const label = `${name} [${input.join(',')}]`;
+      const plan = computeMove(gridFromIceLine(4, dir, input), 4, dir);
+      assert.deepEqual(readIceLine(4, dir, plan.next), input,
+        `${label}：冰塊兩側同值也不得合併，盤面必須原封不動`);
+      assert.equal(plan.changed, false, `${label}：changed 必須是 false`);
+      assert.equal(plan.moves.length, 0, `${label}：不得有 moves`);
+      assert.equal(plan.merges.length, 0, `${label}：不得有 merges`);
+      assert.equal(plan.gained, 0, `${label}：不得有 gained`);
+    });
+  });
+
+  // 會滑動但仍然不合併：遠端的 2 只能靠到冰塊後面，不能跟牆邊的 2 併起來
+  ALL_DIRS().forEach(([name, dir]) => {
+    const plan = computeMove(gridFromIceLine(4, dir, [2, ICE_VALUE, 0, 2]), 4, dir);
+    assert.deepEqual(readIceLine(4, dir, plan.next), [2, ICE_VALUE, 2, 0],
+      `${name} [2,冰,0,2]：遠端的 2 只能靠到冰塊後面第一格`);
+    assert.equal(plan.changed, true);
+    assert.equal(plan.gained, 0, `${name}：跨冰塊不得產生分數`);
+    assert.equal(plan.mergeCount, 0, `${name}：跨冰塊不得合併`);
+    assert.deepEqual(sortMoves(plan.moves), expectMoves(4, dir, [{ k: 3, toK: 2, dying: false }]));
+  });
+
+  // 垂直方向也一樣（直接用整盤驗一次，避免只有線性邏輯被測到）
+  const grid = gridOfIceRows(['2 0 0 0', '-1 0 0 0', '2 0 0 0', '0 0 0 0'], 1);
+  const up = computeMove(grid, 4, DIR.UP);
+  assert.deepEqual(readCells(up.next), valuesFromRows(['2 0 0 0', '-1 0 0 0', '2 0 0 0', '0 0 0 0']),
+    '第 0 行 [2,冰,2,空] 往上：兩顆 2 被冰塊隔開，盤面不得有任何變化');
+  assert.equal(up.changed, false);
+  assert.equal(up.gained, 0);
+});
+
+test('有冰塊時 computeMove 一樣不得 mutate 傳入的 grid', () => {
+  const rows = ['2 2 -1 4', '0 -1 2 2', '8 0 0 8', '0 4 4 0'];
+  ALL_DIRS().forEach(([name, dir]) => {
+    const grid = gridOfIceRows(rows, 1);
+    const refs = grid.slice();
+    const before = snapshotGrid(grid);
+
+    const plan = computeMove(grid, 4, dir);
+
+    assert.notEqual(plan.next, grid, `${name}：next 必須是新陣列`);
+    assert.deepEqual(grid, refs, `${name}：傳入的 grid 陣列內容（磚塊參考）不得改變`);
+    assert.deepEqual(snapshotGrid(grid), before,
+      `${name}：傳入 grid 的面值 / id / ice 旗標都不得被就地改寫`);
+
+    const again = computeMove(grid, 4, dir);
+    assert.deepEqual(readCells(again.next), readCells(plan.next),
+      `${name}：同一個 grid 連跑兩次必須得到一樣的結果`);
+    assert.equal(again.gained, plan.gained);
+  });
+});
+
+test('spawnTile 不會生在冰塊上', () => {
+  // 冰塊佔住正中央四格，其餘全空
+  const rows = ['. . . .', '. -1 -1 .', '. -1 -1 .', '. . . .'];
+  const iceIdx = [5, 6, 9, 10];
+  for (let i = 0; i < 200; i += 1) {
+    const grid = gridOfIceRows(rows, 1);
+    const result = spawnTile(grid, 4, 100 + i, 0.10, createRng(9000 + i));
+    assert.ok(result, '還有空格時 spawnTile 不得回傳 null');
+    assert.equal(iceIdx.indexOf(result.index), -1,
+      `spawnTile 生到了冰塊佔住的格號 ${result.index}`);
+    iceIdx.forEach(idx => {
+      assert.equal(isIce(grid[idx]), true, `格號 ${idx} 的冰塊被新磚覆蓋掉了`);
+    });
+  }
+
+  // 只剩一格空位（其餘全是冰塊）→ 必定生在那一格
+  const almost = gridOfIceRows([
+    '-1 -1 -1 -1',
+    '-1 -1 -1 .',
+    '-1 -1 -1 -1',
+    '-1 -1 -1 -1'
+  ], 1);
+  const only = spawnTile(almost, 4, 77, 0, () => 0.9);
+  assert.ok(only, '還有一格空位時不得回 null');
+  assert.equal(only.index, 7, '唯一的空格是格號 7');
+  assert.equal(almost[7].id, 77);
+  assert.equal(isIce(almost[7]), false, '新磚不是冰塊');
+
+  // 整盤都是冰塊 → 沒有空格，必須回 null 且不動盤面
+  const allIce = gridOfIceRows([
+    '-1 -1 -1 -1',
+    '-1 -1 -1 -1',
+    '-1 -1 -1 -1',
+    '-1 -1 -1 -1'
+  ], 1);
+  const before = snapshotGrid(allIce);
+  assert.equal(spawnTile(allIce, 4, 90, 0.10, () => 0.5), null,
+    '整盤都是冰塊時 spawnTile 必須回傳 null（冰塊是非 null，天然被排除）');
+  assert.deepEqual(snapshotGrid(allIce), before, '回 null 時不得動到盤面');
+});
+
+test('canMove：被冰塊封死的區塊裡的空格不算數', () => {
+  // ── 必須 false：整盤被冰塊切成小區塊，每塊都塞滿且無相鄰同值 ──
+  // 冰塊在格號 7 / 10 / 14；空格 11 與 15 被冰塊完全封死。
+  //   row0 [2,4,2,4]  row1 [4,2,4,冰]  row2 [2,4,冰,空]  row3 [4,2,冰,空]
+  // 逐線手算：col3 = [4,冰,空,空]，往上時 4 已貼牆、往下時冰塊擋住 → 不動；
+  //           row2 / row3 往右時 writeIdx 直接跳到冰塊之後，兩顆磚都留在原位。
+  const sealed = gridOfIceRows([
+    '2 4 2 4',
+    '4 2 4 -1',
+    '2 4 -1 .',
+    '4 2 -1 .'
+  ], 1);
+  ALL_DIRS().forEach(([name, dir]) => {
+    assert.equal(computeMove(sealed, 4, dir).changed, false,
+      `${name}：這個盤面雖然有空格，但空格被冰塊封死，不該有任何變化`);
+  });
+  assert.equal(canMove(sealed, 4), false,
+    '有空格 ≠ 能動：被冰塊完全封死的空格不算數');
+  assert.equal(isGameOver(sealed, 4), true, 'isGameOver 必須等於 !canMove');
+
+  // ── 必須 false：整盤塞滿（含兩顆相鄰冰塊），沒有任何相鄰同值的磚 ──
+  const packedAdjacentIce = gridOfIceRows([
+    '2 4 2 4',
+    '4 -1 -1 2',
+    '2 4 2 4',
+    '4 2 4 2'
+  ], 1);
+  assert.equal(canMove(packedAdjacentIce, 4), false,
+    '兩顆冰塊相鄰時 value 都是 0，不得被誤判成「有相鄰同值可以合併」');
+  assert.equal(isGameOver(packedAdjacentIce, 4), true);
+
+  // ── 必須 false：兩顆同值的 2 中間隔著冰塊 ──
+  const splitEquals = gridOfIceRows([
+    '2 4 2 4',
+    '4 2 4 2',
+    '2 -1 2 4',
+    '4 2 4 2'
+  ], 1);
+  assert.equal(canMove(splitEquals, 4), false,
+    '格號 8 與 10 都是 2，但中間隔著冰塊，不得判定成還能合併');
+  assert.equal(isGameOver(splitEquals, 4), true);
+
+  // ── 必須 true：同一組盤面，只把「活的區塊」開一個空格 ──
+  const holeInLiveBlock = gridOfIceRows([
+    '. 4 2 4',
+    '4 2 4 -1',
+    '2 4 -1 .',
+    '4 2 -1 .'
+  ], 1);
+  assert.equal(canMove(holeInLiveBlock, 4), true,
+    '左上那一塊有空格、格號 1 的磚可以往左滑 → 必須能動');
+  assert.equal(isGameOver(holeInLiveBlock, 4), false);
+
+  // ── 必須 true：塞滿但有相鄰同值（冰塊不影響這個判斷） ──
+  const mergeable = gridOfIceRows([
+    '2 4 2 4',
+    '4 -1 4 2',
+    '2 4 4 2',
+    '4 2 4 2'
+  ], 1);
+  assert.equal(canMove(mergeable, 4), true, '格號 9 與 10 都是 4，可以合併 → 必須能動');
+  assert.equal(isGameOver(mergeable, 4), false);
+
+  // ── 必須 true：冰塊後面還有空格，磚可以往冰塊後面靠 ──
+  const slideBehindIce = gridOfIceRows([
+    '2 4 2 4',
+    '4 2 4 -1',
+    '2 4 -1 .',
+    '4 2 -1 8'
+  ], 1);
+  assert.equal(canMove(slideBehindIce, 4), true,
+    '格號 15 的 8 可以往上滑到格號 11 → 必須能動');
+});
+
+test('gridToValues / gridFromValues 對冰塊 round-trip 正確', () => {
+  const values = valuesFromRows([
+    '2 -1 4 0',
+    '0 8 0 -1',
+    '-1 0 0 2',
+    '0 0 16 0'
+  ]);
+  assert.deepEqual(values, [2, -1, 4, 0, 0, 8, 0, -1, -1, 0, 0, 2, 0, 0, 16, 0],
+    '前置條件：列字串必須讀成這組面值');
+
+  const built = gridFromValues(values, 7);
+  assert.equal(built.grid.length, 16);
+
+  // 冰塊要被還原成「有 id 的 Tile，value 0、ice 旗標為真」
+  [1, 7, 8].forEach(idx => {
+    assert.equal(isIce(built.grid[idx]), true, `格號 ${idx} 必須還原成冰塊`);
+    assert.equal(built.grid[idx].value, 0, `格號 ${idx} 冰塊的 value 必須是 0`);
+    assert.equal(typeof built.grid[idx].id, 'number', `格號 ${idx} 的冰塊必須有自己的 id`);
+  });
+  [0, 2, 5, 11, 14].forEach(idx => {
+    assert.equal(isIce(built.grid[idx]), false, `格號 ${idx} 是一般磚，不得帶 ice 旗標`);
+  });
+  [3, 4, 6, 9, 10, 12, 13, 15].forEach(idx => {
+    assert.equal(built.grid[idx], null, `格號 ${idx} 必須是 null`);
+  });
+
+  // id：一般磚依格號由 nextId 依序配發；冰塊自己的 id 由實作決定（契約只要求「要有 id」），
+  // 但全盤的 id 一律不得重複，也不得撞到之後才會發出去的 id。
+  assert.deepEqual([0, 2, 5, 11, 14].map(i => built.grid[i].id), [7, 8, 9, 10, 11],
+    '一般磚必須依格號由 startId 依序配發 id');
+  assert.ok(built.nextId >= 12,
+    `配發 5 顆一般磚之後 nextId 至少要是 7 + 5（實際 ${built.nextId}），id 永不回收`);
+  const allIds = built.grid.filter(Boolean).map(t => t.id);
+  assert.equal(new Set(allIds).size, allIds.length, '全盤的 id（含冰塊）不得重複');
+  allIds.forEach(id => assert.ok(id < built.nextId, `id ${id} 不得 >= nextId ${built.nextId}`));
+
+  // 逆運算：冰塊要寫回 ICE_VALUE
+  assert.deepEqual(gridToValues(built.grid), values,
+    'gridToValues 必須把冰塊寫回 ICE_VALUE(-1)');
+  assert.deepEqual(readCells(built.grid), values, '盤面內容必須與面值陣列一致');
+
+  // 再 round-trip 一次必須穩定
+  const again = gridFromValues(gridToValues(built.grid), 100);
+  assert.deepEqual(gridToValues(again.grid), values, '連續 round-trip 必須穩定');
+  assert.ok(again.nextId >= 105, `再配發 5 顆一般磚，nextId 至少要是 105（實際 ${again.nextId}）`);
+
+  // maxTile 不得被冰塊干擾
+  assert.equal(maxTile(built.grid), 16, '冰塊 value 0，不得影響 maxTile');
+  assert.equal(maxTile(gridOfIceRows(['-1 -1 . .', '. . . .', '. . . .', '. . . .'], 1)), 0,
+    '整盤只有冰塊時 maxTile 必須是 0（不得是 -1 或 NaN）');
+  assert.equal(isWin(built.grid, 64), false, '最大磚只有 16，不得達標');
+});
+
+// ---------------------------------------------------------------------------
+// I. 樓層、商店與道具（爬塔契約第 1 / 2 節）
+// ---------------------------------------------------------------------------
+
+test('TOWER_FLOORS 五層的 floor / name / target / maxSteps / ice 與契約完全相同', () => {
+  assert.equal(Array.isArray(TOWER_FLOORS), true, 'TOWER_FLOORS 必須是陣列');
+  assert.equal(TOWER_FLOORS.length, 5, '爬塔固定五層');
+
+  assert.deepEqual(TOWER_FLOORS, [
+    { floor: 1, name: '1F 塔底', target: 64, maxSteps: 60, ice: 0 },
+    { floor: 2, name: '2F 迴廊', target: 128, maxSteps: 80, ice: 0 },
+    { floor: 3, name: '3F 冰窖', target: 256, maxSteps: 110, ice: 1 },
+    { floor: 4, name: '4F 霜原', target: 512, maxSteps: 150, ice: 1 },
+    { floor: 5, name: '5F 塔頂', target: 1024, maxSteps: 200, ice: 2 }
+  ], '爬塔契約第 2 節的 TOWER_FLOORS 是寫死的，一個欄位都不能改');
+
+  TOWER_FLOORS.forEach((f, i) => {
+    assert.equal(f.floor, i + 1, '樓層必須由 1 依序遞增');
+    assert.ok(levelOf(f.target) > 0, `${f.name} 的目標 ${f.target} 必須是 2 的冪`);
+    if (i > 0) {
+      assert.ok(f.target > TOWER_FLOORS[i - 1].target, '目標磚必須逐層變大');
+      assert.ok(f.maxSteps > TOWER_FLOORS[i - 1].maxSteps, '步數上限必須逐層變多');
+      assert.ok(f.ice >= TOWER_FLOORS[i - 1].ice, '冰塊數量不得往回減');
+    }
+  });
+  assert.deepEqual(TOWER_FLOORS.map(f => f.ice), [0, 0, 1, 1, 2],
+    '冰塊要到 3F 冰窖才出現，5F 塔頂才有兩顆');
+});
+
+test('towerFloor 取得樓層設定，超出範圍一律回 null', () => {
+  assert.deepEqual(towerFloor(1), TOWER_FLOORS[0]);
+  assert.deepEqual(towerFloor(3), TOWER_FLOORS[2]);
+  assert.deepEqual(towerFloor(5), TOWER_FLOORS[4]);
+  assert.equal(towerFloor(3).target, 256, '3F 冰窖的目標是 256');
+  assert.equal(towerFloor(5).maxSteps, 200, '5F 塔頂的步數上限是 200');
+  assert.equal(towerFloor(5).target, 1024, '通關條件是在 5F 合出 1024');
+
+  [0, -1, 6, 7, 99, NaN, undefined, null].forEach(bad => {
+    assert.equal(towerFloor(bad), null, `towerFloor(${String(bad)}) 必須回 null`);
+  });
+});
+
+test('SHOP_ITEMS 六項的 id / 順序 / 價格 / 名稱 / max 與契約完全相同', () => {
+  assert.equal(Array.isArray(SHOP_ITEMS), true, 'SHOP_ITEMS 必須是陣列');
+  assert.equal(SHOP_ITEMS.length, 6, '商店固定六項商品');
+
+  assert.deepEqual(SHOP_ITEMS.map(i => i.id),
+    ['smash', 'undo', 'shuffle', 'seed', 'melt', 'revive'],
+    '商品的 id 與排列順序都是契約寫死的');
+
+  assert.deepEqual(
+    SHOP_ITEMS.map(i => ({ id: i.id, name: i.name, price: i.price, max: i.max })),
+    [
+      { id: 'smash', name: '敲碎', price: 25, max: undefined },
+      { id: 'undo', name: '悔棋券', price: 20, max: undefined },
+      { id: 'shuffle', name: '重新洗牌', price: 30, max: undefined },
+      { id: 'seed', name: '種子磚', price: 40, max: undefined },
+      { id: 'melt', name: '融冰', price: 35, max: undefined },
+      { id: 'revive', name: '復活權', price: 60, max: 2 }
+    ],
+    '價格與上限是契約寫死的；只有 ❤️ 復活權有 max: 2');
+
+  SHOP_ITEMS.forEach(item => {
+    assert.equal(typeof item.icon, 'string', `${item.id} 必須有 icon`);
+    assert.ok(item.icon.length > 0, `${item.id} 的 icon 不得是空字串`);
+    assert.equal(typeof item.desc, 'string', `${item.id} 必須有 desc 說明`);
+    assert.ok(item.desc.length > 0, `${item.id} 的 desc 不得是空字串`);
+    assert.ok(Number.isInteger(item.price) && item.price > 0, `${item.id} 的價格必須是正整數`);
+  });
+
+  const withMax = SHOP_ITEMS.filter(i => i.max !== undefined);
+  assert.deepEqual(withMax.map(i => i.id), ['revive'], '只有復活權可以疊，其餘商品不得有 max');
+});
+
+test('sacrificeTiles：只消 < target/4 的磚，冰塊與大磚都留著，每顆 +2 金幣', () => {
+  const rows = [
+    '64 32 16 8',
+    '4 2 -1 16',
+    '2 8 4 32',
+    '16 2 8 4'
+  ];
+  // id 依格號配發：格號 i 的磚 id 是 i + 1（格號 6 是冰塊，id 7）
+  const grid = gridOfIceRows(rows, 1);
+  const before = snapshotGrid(grid);
+
+  // 目標磚 64 → 門檻 64 / 4 = 16。value < 16 的磚要被獻祭：
+  //   格號 3(8) 4(4) 5(2) 8(2) 9(8) 10(4) 13(2) 14(8) 15(4) 共 9 顆 → 金幣 18
+  const result = sacrificeTiles(grid, 4, 64);
+
+  assert.ok(result && typeof result === 'object', 'sacrificeTiles 必須回傳物件');
+  assert.equal(Array.isArray(result.grid), true, '必須回傳新的 grid');
+  assert.equal(Array.isArray(result.removed), true, 'removed 必須是格號陣列');
+  assert.equal(result.gold, 18, '9 顆小磚 × 2 = 18 金幣');
+  assert.deepEqual(result.removed.slice().sort((a, b) => a - b),
+    [3, 4, 5, 8, 9, 10, 13, 14, 15], 'removed 必須剛好是那 9 個格號');
+  assert.equal(result.gold, result.removed.length * 2, '金幣必須等於消掉的顆數 × 2');
+
+  assert.deepEqual(readCells(result.grid), valuesFromRows([
+    '64 32 16 0',
+    '0 0 -1 16',
+    '0 0 0 32',
+    '16 0 0 0'
+  ]), '目標磚、>= 16 的磚與冰塊都要留在原位');
+
+  // 留下來的磚必須連 id 一起留在原格（不是重新發牌）
+  [[0, 1, 64], [1, 2, 32], [2, 3, 16], [7, 8, 16], [11, 12, 32], [12, 13, 16]]
+    .forEach(([idx, id, value]) => {
+      assert.ok(result.grid[idx], `格號 ${idx} 的磚不該被消掉`);
+      assert.equal(result.grid[idx].id, id, `格號 ${idx} 的 id 必須維持 ${id}`);
+      assert.equal(result.grid[idx].value, value, `格號 ${idx} 的面值必須維持 ${value}`);
+    });
+  assert.equal(result.grid[2].value, 16, '面值剛好等於 target/4 的磚不得被消掉（是「<」不是「<=」）');
+
+  // 冰塊 value 是 0，比門檻小，但絕不能被當成小磚消掉
+  assert.equal(isIce(result.grid[6]), true, '冰塊不算磚，不得被獻祭');
+  assert.equal(result.grid[6].id, 7, '冰塊的 id 必須維持不變');
+  assert.equal(result.removed.indexOf(6), -1, 'removed 不得包含冰塊的格號');
+
+  // 不得 mutate 傳入的 grid
+  assert.notEqual(result.grid, grid, '必須回傳新陣列');
+  assert.deepEqual(snapshotGrid(grid), before, 'sacrificeTiles 不得 mutate 傳入的 grid');
+
+  // 門檻換成 256 → 只有 64 活得下來
+  const grid2 = gridOfIceRows(rows, 1);
+  const r2 = sacrificeTiles(grid2, 4, 256);
+  assert.deepEqual(r2.removed.slice().sort((a, b) => a - b),
+    [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    'target 256 → 門檻 64，只有格號 0 的 64 留得下來');
+  assert.equal(r2.gold, 28, '14 顆 × 2 = 28 金幣');
+  assert.equal(isIce(r2.grid[6]), true, '冰塊依然不受影響');
+
+  // 沒有小磚可消時：不得無中生有
+  const big = gridOfIceRows(['64 128 . .', '. -1 . .', '. . . .', '. . . .'], 1);
+  const r3 = sacrificeTiles(big, 4, 64);
+  assert.deepEqual(r3.removed, [], '沒有磚小於門檻時 removed 必須是空陣列');
+  assert.equal(r3.gold, 0, '沒消掉任何磚就不得給金幣');
+  assert.deepEqual(readCells(r3.grid), readCells(big), '盤面內容必須原樣保留');
+});
+
+test('shuffleTiles：數值與 id 集合不變、冰塊留在原位、不動 Math.random', () => {
+  const rows = [
+    '2 4 -1 8',
+    '16 -1 32 .',
+    '. 64 . 128',
+    '. . 256 .'
+  ];
+  const grid = gridOfIceRows(rows, 1);
+  const before = snapshotGrid(grid);
+  const ICE_AT = [2, 5];
+
+  const pairsOf = (g) => g
+    .map((t, i) => (t && t.ice !== true ? `${t.id}:${t.value}` : null))
+    .filter(Boolean)
+    .sort();
+  const wantPairs = pairsOf(grid);
+  const emptyCount = grid.filter(t => t === null).length;
+  assert.equal(wantPairs.length, 8, '前置條件：盤面上有 8 顆一般磚');
+  assert.equal(emptyCount, 6, '前置條件：盤面上有 6 個空格');
+
+  const out = shuffleTiles(grid, 4, createRng(20260911));
+
+  assert.equal(Array.isArray(out), true, 'shuffleTiles 必須回傳一個 grid');
+  assert.notEqual(out, grid, '必須回傳新陣列');
+  assert.equal(out.length, 16);
+  assert.deepEqual(snapshotGrid(grid), before, '回傳新 grid 就不得就地改寫傳入的 grid');
+
+  assert.deepEqual(pairsOf(out), wantPairs, '洗牌只重排位置，(id, 面值) 的集合必須完全不變');
+  assert.equal(out.filter(t => t === null).length, emptyCount, '空格數量不得改變');
+
+  ICE_AT.forEach(idx => {
+    assert.equal(isIce(out[idx]), true, `冰塊必須留在格號 ${idx}`);
+    assert.equal(out[idx].id, grid[idx].id, `格號 ${idx} 冰塊的 id 必須不變`);
+  });
+  assert.equal(out.filter(t => isIce(t)).length, 2, '冰塊數量不得改變');
+  out.forEach((tile, i) => {
+    if (!tile || isIce(tile)) return;
+    assert.equal(ICE_AT.indexOf(i), -1, `一般磚不得被洗到冰塊佔住的格號 ${i}`);
+  });
+
+  // 真的有在洗：換幾顆種子必定會出現與原盤不同的排列
+  const moved = [];
+  for (let i = 0; i < 20; i += 1) {
+    const g = gridOfIceRows(rows, 1);
+    const shuffled = shuffleTiles(g, 4, createRng(500 + i));
+    moved.push(JSON.stringify(readCells(shuffled)) !== JSON.stringify(readCells(g)));
+    assert.deepEqual(pairsOf(shuffled), wantPairs, `第 ${i} 次洗牌的磚集合不得改變`);
+    ICE_AT.forEach(idx => assert.equal(isIce(shuffled[idx]), true,
+      `第 ${i} 次洗牌把冰塊挪走了`));
+  }
+  assert.ok(moved.some(Boolean), '連洗 20 次都與原盤一模一樣，這不叫洗牌');
+
+  // 傳入 rng 就不得偷用 Math.random
+  const originalRandom = Math.random;
+  let calls = 0;
+  Math.random = () => { calls += 1; return originalRandom(); };
+  try {
+    shuffleTiles(gridOfIceRows(rows, 1), 4, createRng(7));
+  } finally {
+    Math.random = originalRandom;
+  }
+  assert.equal(calls, 0, `shuffleTiles 必須完全靠傳入的 rng，卻呼叫了 Math.random ${calls} 次`);
+});
+
+test('placeIce：不放角落、不放已有磚的格子、數量正確', () => {
+  const CORNERS = { 3: [0, 2, 6, 8], 4: [0, 3, 12, 15], 5: [0, 4, 20, 24] };
+
+  [3, 4, 5].forEach(n => {
+    for (let i = 0; i < 40; i += 1) {
+      const grid = createInitialGrid(n);
+      const placed = placeIce(grid, n, 2, createRng(3000 + i));
+
+      assert.equal(Array.isArray(placed), true, `${n}×${n}：placeIce 必須回傳格號陣列`);
+      assert.equal(placed.length, 2, `${n}×${n}：要求 2 顆就必須放 2 顆`);
+      assert.equal(new Set(placed).size, placed.length, `${n}×${n}：不得把兩顆冰塊放在同一格`);
+      placed.forEach(idx => {
+        assert.ok(Number.isInteger(idx) && idx >= 0 && idx < n * n,
+          `${n}×${n}：格號 ${idx} 超出範圍`);
+        assert.equal(CORNERS[n].indexOf(idx), -1,
+          `${n}×${n}：冰塊不得放在角落（格號 ${idx}）`);
+        assert.equal(isIce(grid[idx]), true, `${n}×${n}：格號 ${idx} 必須真的變成冰塊`);
+        assert.equal(grid[idx].value, 0, `${n}×${n}：冰塊的 value 必須是 0`);
+      });
+      assert.equal(grid.filter(t => isIce(t)).length, 2,
+        `${n}×${n}：盤面上的冰塊數量必須剛好是 2`);
+      assert.equal(grid.filter(t => t !== null).length, 2,
+        `${n}×${n}：除了冰塊之外不得多長出東西`);
+    }
+  });
+
+  // 已經有磚的格子不得被冰塊覆蓋：只留格號 5 與 10 兩個非角落空格
+  for (let i = 0; i < 20; i += 1) {
+    const grid = gridOfIceRows([
+      '2 4 8 16',
+      '32 . 64 128',
+      '2 4 . 8',
+      '16 32 64 128'
+    ], 1);
+    const snap = snapshotGrid(grid);
+    const placed = placeIce(grid, 4, 2, createRng(600 + i));
+    assert.deepEqual(placed.slice().sort((a, b) => a - b), [5, 10],
+      '只有格號 5 與 10 是空的非角落格，冰塊只能放這兩格');
+    grid.forEach((tile, idx) => {
+      if (idx === 5 || idx === 10) return;
+      assert.deepEqual(
+        tile ? { id: tile.id, value: tile.value, ice: tile.ice === true } : null,
+        snap[idx], `格號 ${idx} 的既有磚不得被冰塊覆蓋`);
+    });
+  }
+
+  // 數量為 0：什麼都不做
+  const untouched = createInitialGrid(4);
+  const none = placeIce(untouched, 4, 0, createRng(1));
+  assert.deepEqual(none, [], 'count 0 必須回傳空陣列');
+  assert.equal(untouched.filter(t => t !== null).length, 0, 'count 0 不得放任何冰塊');
+
+  // 可用格子不夠時只能少放，不得拋例外、也不得塞進角落或已有磚的格子
+  const tight = gridOfIceRows([
+    '2 4 8 16',
+    '32 64 128 256',
+    '2 4 8 16',
+    '32 64 . 128'
+  ], 1);
+  let placedTight;
+  assert.doesNotThrow(() => { placedTight = placeIce(tight, 4, 3, createRng(11)); },
+    '可用格子不足時不得拋例外');
+  assert.ok(placedTight.length <= 1,
+    `只剩格號 14 一個非角落空格，最多只能放 1 顆（實際 ${placedTight.length} 顆）`);
+  placedTight.forEach(idx => assert.equal(idx, 14, '唯一能放的是格號 14'));
+
+  // 傳入 rng 就不得偷用 Math.random
+  const originalRandom = Math.random;
+  let calls = 0;
+  Math.random = () => { calls += 1; return originalRandom(); };
+  try {
+    placeIce(createInitialGrid(4), 4, 2, createRng(99));
+  } finally {
+    Math.random = originalRandom;
+  }
+  assert.equal(calls, 0, `placeIce 必須完全靠傳入的 rng，卻呼叫了 Math.random ${calls} 次`);
+});
+
+// ---------------------------------------------------------------------------
+// J. 爬塔的 APP 行為（復活權、過關結算）
+// ---------------------------------------------------------------------------
+
+test('爬塔：步數用完時有復活權就自動續 30 步，沒有就結束這一局', () => {
+  withStubEnv(() => {
+    // 爬塔契約沒有指定這個方法的名字，測試接受下列任一候選
+    const STEP_CANDIDATES = [
+      'checkTowerProgress', 'towerCheckProgress', 'towerProgress',
+      'towerCheckSteps', 'checkTowerSteps', 'towerOutOfSteps', 'towerStepsExhausted',
+      'towerCheckFail', 'checkTowerFail', 'towerCheckEnd', 'towerAfterMove', 'towerOnMove',
+      'towerTryRevive', 'tryTowerRevive', 'towerRevive', 'tryRevive', 'maybeRevive',
+      'consumeRevive', 'useRevive'
+    ];
+    const name = pickMethod(STEP_CANDIDATES, '步數用完時的失敗 / 復活判定');
+    const floor = 3;
+    const maxSteps = towerFloor(floor).maxSteps;   // 110
+    const board = ['2 4 8 16', '32 64 . .', '. . -1 .', '. . . .'];
+
+    // ── 有復活權：自動消耗一張，續 REVIVE_STEPS 步 ──
+    const alive = makeTowerApp(
+      { floor, steps: maxSteps, gold: 40, items: emptyItems({ revive: 1 }) },
+      { grid: gridOfIceRows(board, 1), score: 1000, showToast() {}, fireConfetti() {} }
+    );
+    assert.doesNotThrow(() => { alive[name](); },
+      `${name}() 在假 DOM（this.el 為空物件）下不得拋例外`);
+
+    assert.equal(alive.tower.items.revive, 0, '步數用完時必須自動消耗掉一張復活權');
+    assert.notEqual(alive.gameOver, true, '還有復活權時不得結束這一局');
+    const remain = maxSteps - alive.tower.steps;
+    assert.ok(remain >= REVIVE_STEPS - 1 && remain <= REVIVE_STEPS,
+      `復活後剩餘步數必須是 ${REVIVE_STEPS} 步（steps 是「本層已用步數」，`
+      + `所以 ${maxSteps} - steps 必須回到 ${REVIVE_STEPS}），實際剩 ${remain} 步`);
+
+    // ── 沒有復活權：這一局結束 ──
+    const dead = makeTowerApp(
+      { floor, steps: maxSteps, gold: 40, items: emptyItems() },
+      { grid: gridOfIceRows(board, 1), score: 1000, showToast() {}, fireConfetti() {} }
+    );
+    assert.doesNotThrow(() => { dead[name](); },
+      `${name}() 在沒有復活權時同樣不得拋例外`);
+    assert.equal(dead.tower.items.revive, 0, '沒有復活權時不得憑空生出一張');
+    assert.equal(dead.gameOver, true, '步數用完又沒有復活權 → 這一局必須結束');
+
+    // ── 復活權最多疊 2 張，一次只能用掉一張 ──
+    const twice = makeTowerApp(
+      { floor, steps: maxSteps, gold: 40, items: emptyItems({ revive: 2 }) },
+      { grid: gridOfIceRows(board, 1), score: 1000, showToast() {}, fireConfetti() {} }
+    );
+    twice[name]();
+    assert.equal(twice.tower.items.revive, 1, '一次只能消耗一張復活權');
+    assert.notEqual(twice.gameOver, true);
+  });
+});
+
+test('爬塔：過關結算不重置盤面，目標磚與大磚都留在原位、冰塊被移除', () => {
+  withStubEnv(() => {
+    // 爬塔契約沒有指定這個方法的名字，測試接受下列任一候選
+    const name = pickMethod([
+      'checkTowerProgress', 'towerCheckProgress', 'towerSettleFloor', 'settleFloor',
+      'towerFloorCleared', 'onFloorCleared', 'floorCleared', 'towerFinishFloor',
+      'finishFloor', 'completeFloor', 'towerCompleteFloor', 'towerSettle'
+    ], '過關結算（獻祭小磚、移除冰塊、開商店）');
+
+    // 1F 塔底的目標是 64 → 門檻 64 / 4 = 16
+    //   < 16 的 9 顆小磚要被獻祭（金幣 +18），>= 16 的磚與目標磚留在原位
+    const grid = gridOfIceRows([
+      '64 32 16 8',
+      '4 2 -1 16',
+      '2 8 4 32',
+      '16 2 8 4'
+    ], 1);
+    const app = makeTowerApp(
+      { floor: 1, steps: 20, gold: 10, items: emptyItems() },
+      { grid, score: 900, showToast() {}, fireConfetti() {} }
+    );
+
+    assert.doesNotThrow(() => { app[name](); },
+      `${name}() 在假 DOM（this.el 為空物件）下不得拋例外`);
+
+    assert.deepEqual(readCells(app.grid), valuesFromRows([
+      '64 32 16 0',
+      '0 0 0 16',
+      '0 0 0 32',
+      '16 0 0 0'
+    ]), '過關不得清盤：目標磚與 >= 16 的磚都要留在原位，只有小磚被獻祭、冰塊被移除');
+
+    assert.equal(app.grid[0].value, 64, '目標磚必須留在原位');
+    assert.equal(app.grid[0].id, 1, '目標磚必須是原來那一顆（id 不變）');
+    assert.equal(app.grid[2].id, 3, '格號 2 的 16 必須是原來那一顆');
+    assert.equal(app.grid[12].id, 13, '格號 12 的 16 必須是原來那一顆');
+    assert.equal(app.grid.filter(t => isIce(t)).length, 0, '過關結算必須移除本層的冰塊');
+    assert.equal(app.tower.gold, 10 + 18, '獻祭 9 顆小磚 → 金幣必須從 10 加到 28');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// K. 爬塔存檔（爬塔契約第 4 節）
+// ---------------------------------------------------------------------------
+
+test('爬塔存檔 round-trip：樓層、步數、金幣、道具、冰塊位置都要還原', () => {
+  withStubEnv(store => {
+    const rows = ['2 4 -1 8', '16 32 . .', '. . -1 .', '. . . 64'];
+    const values = valuesFromRows(rows);
+    const items = { smash: 1, undo: 2, shuffle: 0, seed: 1, melt: 0, revive: 1 };
+
+    const saver = makeTowerApp({
+      floor: 3, steps: 42, gold: 128, items, seedPending: true, meltNext: 1
+    }, {
+      grid: gridOfIceRows(rows, 1),
+      score: 4321,
+      moveCount: 99,
+      nextId: 30,
+      undosUsed: 1
+    });
+    saver.saveGameState();
+
+    const raw = store[SAVE_KEY];
+    assert.ok(raw, `爬塔存檔必須寫進 ${SAVE_KEY}`);
+    const payload = JSON.parse(raw);
+
+    assert.equal(payload.mode, MODES.TOWER, '存檔的 mode 必須是 tower');
+    assert.equal(payload.size, 4, '爬塔固定 4×4');
+    assert.deepEqual(payload.values, values, '冰塊必須以 ICE_VALUE(-1) 寫進 values');
+    assert.equal(payload.values[2], ICE_VALUE);
+    assert.equal(payload.values[10], ICE_VALUE);
+
+    assert.ok(payload.tower && typeof payload.tower === 'object',
+      '爬塔存檔必須有 tower 欄位（爬塔契約第 4 節）');
+    assert.equal(payload.tower.floor, 3, '樓層必須寫進存檔');
+    assert.equal(payload.tower.steps, 42, '本層已用步數必須寫進存檔');
+    assert.equal(payload.tower.gold, 128, '金幣必須寫進存檔');
+    assert.deepEqual(payload.tower.items, items, '六項道具的數量都要寫進存檔');
+    assert.equal(payload.tower.seedPending, true, '種子磚的待用狀態必須寫進存檔');
+    assert.equal(payload.tower.meltNext, 1, '融冰要少放幾顆必須寫進存檔');
+
+    // ---- 讀回 ----
+    const loader = makeApp({
+      mode: MODES.CLASSIC,
+      grid: createInitialGrid(4),
+      score: 0,
+      nextId: 1,
+      undosUsed: 0,
+      moveCount: 0
+    });
+    assert.equal(loader.loadGameState(), true, '合法的爬塔存檔必須回傳 true');
+
+    assert.equal(loader.mode, MODES.TOWER, '模式必須還原成 tower');
+    assert.deepEqual(readCells(loader.grid), values, '盤面（含冰塊）必須完整還原');
+    [2, 10].forEach(idx => {
+      assert.equal(isIce(loader.grid[idx]), true, `格號 ${idx} 必須還原成冰塊`);
+      assert.equal(typeof loader.grid[idx].id, 'number', `格號 ${idx} 的冰塊必須有 id`);
+    });
+    assert.equal(isIce(loader.grid[0]), false, '格號 0 是一般磚，不得被還原成冰塊');
+
+    const ids = readIds(loader.grid).filter(v => v > 0);
+    assert.equal(new Set(ids).size, ids.length, '還原後的磚塊 id 不得重複（冰塊也算）');
+    ids.forEach(id => assert.ok(id < loader.nextId, `id ${id} 不得 >= nextId`));
+
+    assert.ok(loader.tower && typeof loader.tower === 'object',
+      '載入後必須還原爬塔狀態（爬塔契約第 4 節的 tower 結構）');
+    assert.equal(loader.tower.floor, 3, '樓層必須還原');
+    assert.equal(loader.tower.steps, 42, '本層已用步數必須還原');
+    assert.equal(loader.tower.gold, 128, '金幣必須還原');
+    assert.deepEqual(loader.tower.items, items, '道具必須還原');
+    assert.equal(loader.tower.seedPending, true, '種子磚待用狀態必須還原');
+    assert.equal(loader.tower.meltNext, 1, '融冰次數必須還原');
+    assert.equal(loader.score, 4321, '分數必須還原');
+    stopTimers(loader);
+  });
+});
+
+test('存檔出現 -1：只有爬塔模式收，經典 / 閃電一律拒絕', () => {
+  const iceValues = valuesFromRows(['2 4 -1 8', '. . . .', '. . . .', '. . . .']);
+  const cleanValues = valuesFromRows(['2 4 0 8', '. . . .', '. . . .', '. . . .']);
+
+  const payloadOf = (mode, values, extra) => Object.assign({
+    v: 1,
+    mode,
+    size: 4,
+    values,
+    nextId: 9,
+    score: 100,
+    moveCount: 5,
+    undosUsed: 0,
+    hintsUsed: 0,
+    continued: false,
+    blitzLeftMs: mode === MODES.BLITZ ? 60000 : 0,
+    startedAt: 1700000000000,
+    undo: null
+  }, extra);
+
+  const towerExtra = {
+    tower: {
+      floor: 3, steps: 10, gold: 0, items: emptyItems(), seedPending: false, meltNext: 0
+    }
+  };
+
+  // 對照組：同一份存檔把 -1 換成 0 就要收 —— 證明拒絕的理由真的是那個 -1
+  [[MODES.CLASSIC, {}], [MODES.BLITZ, {}]].forEach(([mode, extra]) => {
+    withStubEnv(store => {
+      store[SAVE_KEY] = JSON.stringify(payloadOf(mode, cleanValues, extra));
+      const app = makeApp({ mode, grid: createInitialGrid(4), score: 777 });
+      assert.equal(app.loadGameState(), true,
+        `前置條件：${mode} 模式沒有 -1 的存檔必須收得下`);
+      stopTimers(app);   // 閃電模式載入會起倒數 interval，不關掉會拖住整份測試
+    });
+  });
+
+  // 經典 / 閃電模式出現 -1 一律拒絕
+  [MODES.CLASSIC, MODES.BLITZ].forEach(mode => {
+    withStubEnv(store => {
+      store[SAVE_KEY] = JSON.stringify(payloadOf(mode, iceValues, {}));
+      const app = makeApp({
+        mode,
+        grid: gridOfRows(['2 0 0 0', '0 0 0 0', '0 0 0 0', '0 0 0 0'], 1),
+        score: 777
+      });
+      const before = readValues(app.grid);
+
+      let result;
+      assert.doesNotThrow(() => { result = app.loadGameState(); },
+        `${mode} 模式遇到 -1 不得拋例外`);
+      assert.equal(result, false,
+        `${mode} 模式的存檔出現 -1（冰塊）必須一律拒絕：只有爬塔才有冰塊`);
+      assert.deepEqual(readValues(app.grid), before, `${mode}：被拒絕時不得污染現有盤面`);
+      assert.equal(app.score, 777, `${mode}：被拒絕時不得污染現有分數`);
+    });
+  });
+
+  // 爬塔模式才收 -1
+  withStubEnv(store => {
+    store[SAVE_KEY] = JSON.stringify(payloadOf(MODES.TOWER, iceValues, towerExtra));
+    const app = makeApp({ grid: createInitialGrid(4), score: 0 });
+    assert.equal(app.loadGameState(), true, '爬塔模式的存檔必須接受 -1');
+    assert.equal(isIce(app.grid[2]), true, '格號 2 必須還原成冰塊');
+    stopTimers(app);
+  });
+
+  // 爬塔模式也只放寬 -1 這一個值，其餘非法面值照樣擋
+  [[-2, '面值是 -2'], [3, '面值不是 2 的冪'], [Math.pow(2, MAX_LEVEL + 1), '面值超過 2^MAX_LEVEL']]
+    .forEach(([bad, label]) => {
+      withStubEnv(store => {
+        const values = iceValues.slice();
+        values[0] = bad;
+        store[SAVE_KEY] = JSON.stringify(payloadOf(MODES.TOWER, values, towerExtra));
+        const app = makeApp({
+          grid: gridOfRows(['2 0 0 0', '0 0 0 0', '0 0 0 0', '0 0 0 0'], 1),
+          score: 55
+        });
+        let result;
+        assert.doesNotThrow(() => { result = app.loadGameState(); }, `${label}：不得拋例外`);
+        assert.equal(result, false, `爬塔模式只放寬 -1，${label} 照樣要擋下來`);
+        assert.equal(app.score, 55, `${label}：被擋下後不得污染現有狀態`);
+      });
+    });
+});
+
+test('爬塔戰績桶含 plays / clears / deepestFloor / bestGold / bestFloorSteps，初值都是 0', () => {
+  withStubEnv(() => {
+    // 爬塔契約第 4 節只寫死欄位，沒有指定建立這個桶的方法名稱
+    const name = pickMethod([
+      'emptyTower', 'emptyTowerBucket', 'towerBucket', 'zeroTower', 'defaultTowerStats',
+      'emptyTowerStats', 'newTowerBucket'
+    ], '建立爬塔戰績桶');
+
+    const app = makeApp({});
+    const bucket = app[name]();
+    assert.ok(bucket && typeof bucket === 'object', `${name}() 必須回傳物件`);
+    assert.deepEqual(Object.keys(bucket).sort(),
+      ['bestFloorSteps', 'bestGold', 'clears', 'deepestFloor', 'plays'],
+      '爬塔戰績的欄位是契約第 4 節寫死的，多一個少一個都不行');
+    Object.keys(bucket).forEach(key => {
+      assert.equal(bucket[key], 0, `${key} 的初值必須是 0`);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // G. 跨檔案對齊（契約第 12 節，純字串比對）
 // ---------------------------------------------------------------------------
 
@@ -2224,4 +3412,90 @@ test('2048.js 使用 Pointer Events，並具備契約第 9 節要求的關鍵字
 
   assert.match(css, /touch-action\s*:\s*none/,
     '#board-frame 必須設定 touch-action: none');
+});
+
+// ---------------------------------------------------------------------------
+// L. 爬塔的跨檔案對齊（爬塔契約第 3 節）
+// ---------------------------------------------------------------------------
+
+test('爬塔 HUD 與商店的 id / class 在 index.html 與 2048.css 裡都齊全', () => {
+  const html = needFile(HTML_PATH);
+  const js = needFile(JS_PATH);
+  const css = needFile(CSS_PATH);
+
+  const htmlIds = new Set();
+  const idRe = /\bid\s*=\s*["']([^"']+)["']/g;
+  let m = idRe.exec(html);
+  while (m) { htmlIds.add(m[1]); m = idRe.exec(html); }
+
+  // 爬塔契約第 3 節逐字寫死的 id
+  ['tower-bar', 'floor-badge', 'step-counter', 'gold-counter', 'revive-counter', 'shop-modal']
+    .forEach(id => {
+      assert.ok(htmlIds.has(id), `index.html 缺少爬塔契約第 3 節寫死的 id="${id}"`);
+    });
+
+  // #tower-bar 初始必須是 hidden（契約寫成 div.tower-bar#tower-bar[hidden]）
+  const towerBarTag = html.match(/<([a-zA-Z][\w-]*)\b([^>]*\bid\s*=\s*["']tower-bar["'][^>]*)>/);
+  assert.ok(towerBarTag, 'index.html 找不到 #tower-bar');
+  assert.match(towerBarTag[2], /\bhidden\b/, '#tower-bar 初始必須帶 hidden');
+
+  const parsed = parseCss(stripCssComments(css));
+  const cssClasses = new Set();
+  parsed.rules.forEach(rule => {
+    classesInSelector(rule.selector).forEach(c => cssClasses.add(c));
+  });
+
+  // 爬塔契約第 3 節逐字寫死的 class（.shop-* 三個是從掃雷的商店借用過來的）
+  [
+    'tower-bar', 'floor-badge', 'step-counter', 'gold-counter', 'revive-counter',
+    'is-low', 'is-smashing', 'shop-items-grid', 'shop-card', 'shop-buy-btn'
+  ].forEach(name => {
+    assert.ok(cssClasses.has(name), `2048.css 缺少爬塔契約第 3 節寫死的 .${name} 樣式`);
+  });
+
+  const used = new Set();
+  collectHtmlClasses(html).forEach(c => used.add(c));
+  collectJsClasses(js).forEach(c => used.add(c));
+  ['tower-bar', 'is-smashing', 'shop-card', 'shop-buy-btn'].forEach(name => {
+    assert.ok(used.has(name), `.${name} 有樣式卻沒有任何 HTML / JS 用到它`);
+  });
+
+  // body[data-mode="tower"] 這一路的樣式必須存在
+  const towerModeRules = parsed.rules.filter(rule => rule.selector.indexOf('[data-mode="tower"]') !== -1
+    || rule.selector.indexOf("[data-mode='tower']") !== -1);
+  assert.ok(towerModeRules.length > 0,
+    '2048.css 必須有 body[data-mode="tower"] 的樣式（隱藏 #size-bar、顯示爬塔 HUD）');
+
+  // 商品必須由 JS 依 SHOP_ITEMS 生成，不得寫死在 HTML
+  assert.match(js, /SHOP_ITEMS\s*(?:\.\s*(?:forEach|map|reduce|filter)|\[)/,
+    '商店商品必須由 JS 依 SHOP_ITEMS 產生');
+});
+
+test('2048.css 的 animation / transition 時長一律走 var()，不得出現裸的數字', () => {
+  const css = needFile(CSS_PATH);
+  const parsed = parseCss(stripCssComments(css));
+  const blocks = parsed.rules.concat(
+    parsed.keyframes.map(k => ({ selector: k.prelude, body: k.body }))
+  );
+
+  // 110ms / 0.11s / .11s 這種寫法都不行；var(--slide-ms) 這種才行
+  const BARE_TIME = /(?<![\w.-])\d*\.?\d+m?s(?![\w-])/;
+  const offenders = [];
+
+  blocks.forEach(rule => {
+    const declRe = /(^|[;{\s])(animation|transition)(-duration|-delay)?\s*:([^;}]*)/g;
+    let m = declRe.exec(rule.body);
+    while (m) {
+      const prop = m[2] + (m[3] || '');
+      const value = m[4].trim();
+      if (BARE_TIME.test(value)) {
+        offenders.push(`${rule.selector.trim()} { ${prop}: ${value} }`);
+      }
+      m = declRe.exec(rule.body);
+    }
+  });
+
+  assert.deepEqual(offenders, [],
+    '契約第 6 節：時序常數只有一個真相（JS 的常數 → CSS 變數），'
+    + `使用點一律要寫 var(...)：${offenders.join(' / ')}`);
 });
