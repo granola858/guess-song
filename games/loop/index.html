@@ -7,6 +7,20 @@
   <title>Loop 電流接接樂 - 波波小遊戲</title>
   <meta name="description" content="旋轉電路拼湊完整迴路！連接電池能量核心，點亮所有終端燈泡與整張電網。">
   
+  <!-- 防止深色模式閃爍：在任何樣式表套用前就把主題寫進 documentElement -->
+  <!-- 內容為 BoboTheme.ANTI_FLASH_SNIPPET 的單一複製來源，請勿自行改寫 -->
+  <script>
+    (() => {
+      try {
+        const homePref = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
+        const theme = ['dark', 'light'].includes(homePref.theme)
+          ? homePref.theme
+          : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+
   <!-- 字型 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -99,7 +113,10 @@
     </div>
   </div>
 
+  <script src="../../assets/js/bobo-confetti.js"></script>
+  <script src="../../assets/js/bobo-theme.js"></script>
   <script src="../../assets/js/stats.js"></script>
+  <script src="../../assets/js/bobo-audio.js"></script>
   <script src="loop.js"></script>
   <script>
     if (typeof Stats !== 'undefined') Stats.recordGamePlay('loop');

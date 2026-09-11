@@ -1,0 +1,2053 @@
+/* ==========================================================================
+   2048
+   自足式設計系統：暖棕木質色調 + 雙主題（淺色 / 深色）
+   本檔不依賴任何共用樣式表，所有元件樣式皆內含
+   --------------------------------------------------------------------------
+   本檔三條鐵律（違反其中任何一條都會出現難以察覺的視覺 bug）：
+   1. transform 的所有權切成兩層：.tile 只做位移、.tile-face 只做縮放，
+      所有 @keyframes 一律只能加在 .tile-face（或其偽元素）上。
+   2. 絕對不在 .tile 上對 opacity 做過渡（理由見 §7 的長註解）。
+   3. 所有 animation / transition 的時長一律走 var()，
+      不得在使用點硬寫數字（唯一真相在 2048.js 的 SLIDE_MS / POP_MS / SPAWN_MS）。
+   ========================================================================== */
+
+:root {
+  /* --- 字體（與 index.html 的 Google Fonts 引入一致） --- */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft JhengHei', 'PingFang TC', sans-serif;
+  --font-mono: 'Space Mono', 'Consolas', 'Courier New', monospace;
+
+  /* --- 圓角 --- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* --- 動畫時長與緩動 ---------------------------------------------------
+     刻意把「時長」與「緩動曲線」拆成兩組變數，變數名一律用 --dur-* / --ease-*，
+     不用 --transition-* / --animation-* 這種帶有屬性名的命名：
+     契約 §6 的測試會掃「animation / transition 後面接裸的時長數字」，
+     變數名一旦含有那兩個字，光是宣告本身就可能被正則誤判成硬寫時長。 */
+  --dur-fast: 0.15s;
+  --dur-normal: 0.25s;
+  --dur-slow: 0.4s;
+  --dur-shake: 0.24s;      /* 撞牆微震 */
+  --dur-glow: 2.2s;        /* 2048 榮耀金光暈脈動 */
+  --dur-pulse: 0.9s;       /* 閃電模式剩餘時間告急脈動 */
+  --dur-gain: 0.9s;        /* 得分浮動 */
+  --dur-chain: 0.6s;       /* 連鎖徽章彈入 */
+  --dur-frost: 4.2s;       /* 爬塔冰塊的霜紋呼吸 */
+  --dur-smash: 1.2s;       /* 敲碎模式的「這顆可以點」提示脈動 */
+  --dur-toast: 0.3s;
+  --dur-modal: 0.25s;
+  --dur-none: 0.01ms;      /* prefers-reduced-motion 的歸零時長 */
+  --delay-none: 0ms;       /* prefers-reduced-motion 的歸零延遲 */
+
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ease-slide: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* --- 磚塊時序：預設 fallback ------------------------------------------
+     唯一真相是 2048.js 的 SLIDE_MS / POP_MS / SPAWN_MS，
+     由 Game2048.prototype.syncMotionTokens() 在 init() 時寫進 documentElement。
+     這裡宣告的是「JS 還沒跑起來（或測試環境）」時的同值預設，契約 §6 明文允許。
+     所有使用點一律 var(--slide-ms) / var(--pop-ms) / var(--spawn-ms)，不得硬寫。 */
+  --slide-ms: 110ms;
+  --pop-ms: 180ms;
+  --spawn-ms: 140ms;
+
+  /* --- 陰影（暖棕調的投影，不用中性灰） --- */
+  --shadow-sm: 0 2px 8px rgba(74, 47, 25, 0.10);
+  --shadow-md: 0 8px 24px rgba(74, 47, 25, 0.16);
+  --shadow-lg: 0 16px 40px rgba(74, 47, 25, 0.24);
+}
+
+/* ==========================================================================
+   1. 雙主題色票
+   ========================================================================== */
+
+/* --- A. 淺色主題（預設）：奶油紙 + 焦糖木 --- */
+:root,
+:root[data-theme="light"],
+html[data-theme="light"] {
+  --bg-primary: #faf4ea;
+  --bg-secondary: #fffdf8;
+  --bg-tertiary: #f2e6d3;
+  --bg-glass: rgba(255, 253, 248, 0.88);
+  --border-color: #e2cfb2;
+  --border-focus: #8b5a2b;
+  --text-main: #3c2a1a;
+  --text-muted: #8a7159;
+
+  --accent-primary: #a9682f;
+  --accent-secondary: #c98a45;
+  --accent-soft: #f6e7d2;
+  --accent-glow: rgba(169, 104, 47, 0.22);
+
+  --danger: #d1402f;
+  --warning: #d97706;
+  --success: #15803d;
+
+  /* 棋盤：溫潤的胡桃木底 */
+  --board-bg: #bda98f;
+  --board-border: #9b8468;
+  --board-inner-shadow: rgba(74, 47, 25, 0.30);
+  --cell-bg: rgba(255, 250, 240, 0.42);
+}
+
+/* --- B. 深色主題：夜色核桃木，整組降低亮度並維持文字對比 --- */
+:root[data-theme="dark"],
+html[data-theme="dark"] {
+  --bg-primary: #17110d;
+  --bg-secondary: #211a14;
+  --bg-tertiary: #2d231a;
+  --bg-glass: rgba(33, 26, 20, 0.88);
+  --border-color: #46372a;
+  --border-focus: #e0a35e;
+  --text-main: #f2e7d8;
+  --text-muted: #b09a81;
+
+  --accent-primary: #d99a56;
+  --accent-secondary: #b87a3c;
+  --accent-soft: #3a2c1e;
+  --accent-glow: rgba(217, 154, 86, 0.26);
+
+  --danger: #f0715e;
+  --warning: #fbbf24;
+  --success: #4ade80;
+
+  --board-bg: #3a2e23;
+  --board-border: #241b13;
+  --board-inner-shadow: rgba(0, 0, 0, 0.55);
+  --cell-bg: rgba(255, 244, 230, 0.07);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.42);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.52);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.62);
+}
+
+/* ==========================================================================
+   2. 基礎重置
+   ========================================================================== */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  position: relative;
+  transition: background-color var(--dur-normal) var(--ease-out),
+              color var(--dur-normal) var(--ease-out);
+}
+
+/* 氛圍光暈 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.7;
+  background-image:
+    radial-gradient(circle at 16% 10%, var(--accent-glow) 0%, transparent 44%),
+    radial-gradient(circle at 84% 90%, var(--accent-glow) 0%, transparent 44%);
+  transition: opacity var(--dur-normal) var(--ease-out);
+}
+
+#confetti-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* ==========================================================================
+   3. 頁面容器與頂部列
+   ========================================================================== */
+
+.page-container {
+  position: relative;
+  z-index: 1;
+  /* 寬度一律 width: 100% + max-width，絕不用 vw：
+     vw 含捲軸寬度、也不扣自身左右 padding，桌機一旦出現傳統捲軸就會溢出。 */
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 12px 16px 104px;   /* 底部留給固定的 .thumb-action-bar */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.top-bar {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: var(--dur-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
+}
+
+.back-btn:hover {
+  background: var(--bg-tertiary);
+  transform: translateY(-1px);
+}
+
+.back-btn svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 1.05rem;
+  line-height: 1;
+  transition: var(--dur-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
+}
+
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+/* 註：頂部圖示鍵沒有 .active 狀態 —— 皮膚鍵、主題鍵、音效鍵一律用 aria-pressed
+   表達開關，戰績與說明鍵則根本沒有狀態。這裡只寫 aria-pressed 的樣式，
+   不保留 .icon-btn.active 這種沒人加的死規則。 */
+.icon-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+:root[data-theme="dark"] .icon-btn[aria-pressed="true"],
+html[data-theme="dark"] .icon-btn[aria-pressed="true"] {
+  color: var(--accent-primary);
+  background: var(--bg-tertiary);
+}
+
+.back-btn:focus-visible,
+.icon-btn:focus-visible,
+.mode-tab-btn:focus-visible,
+.size-btn:focus-visible,
+.action-btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.modal-close-btn:focus-visible,
+.board-frame:focus-visible {
+  outline: 3px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   4. 標題、模式分頁、盤面大小
+   ========================================================================== */
+
+.game-header {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.main-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: linear-gradient(135deg, var(--text-main) 28%, var(--accent-primary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.main-title-text {
+  white-space: nowrap;
+}
+
+.main-title-badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+  -webkit-text-fill-color: #ffffff;
+  white-space: nowrap;
+}
+
+/* --- 模式分段控制 --- */
+.mode-tabs {
+  display: flex;
+  background: var(--bg-secondary);
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 10px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.mode-tab-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--dur-fast) var(--ease-out);
+  white-space: nowrap;
+}
+
+.mode-tab-btn.active {
+  background: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 10px var(--accent-glow);
+}
+
+/* --- 盤面大小列（戰績彈窗的 #stats-size-tabs 共用同一套） --- */
+.size-bar {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.size-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--dur-fast) var(--ease-out);
+}
+
+.size-btn:hover {
+  border-color: var(--accent-primary);
+}
+
+.size-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+:root[data-theme="dark"] .size-btn.active,
+html[data-theme="dark"] .size-btn.active {
+  background: var(--bg-tertiary);
+}
+
+/* 加時閃電固定 4×4、且不給悔棋：整列與整顆鍵直接收掉。
+   特異度 (1,1,1) 穩穩蓋過 .size-bar 的 (0,1,0)。 */
+body[data-mode="blitz"] #size-bar,
+body[data-mode="blitz"] #undo-btn {
+  display: none;
+}
+
+/* 爬塔同樣固定 4×4，盤面大小列一起收掉。
+   但爬塔「有」悔棋（而且還能用悔棋券加次數），所以刻意不連帶隱藏 #undo-btn。 */
+body[data-mode="tower"] #size-bar {
+  display: none;
+}
+
+/* 經典與爬塔都沒有倒數列（HTML 預設也帶 hidden，這裡是模式切換時的保險） */
+body[data-mode="classic"] #blitz-bar,
+body[data-mode="tower"] #blitz-bar {
+  display: none;
+}
+
+/* 反過來，爬塔狀態列只在爬塔模式出現。
+   這裡一律只寫「隱藏」不寫「顯示」：顯示由 JS 拿掉 hidden 屬性決定，
+   若這裡寫 body[data-mode="tower"] #tower-bar { display: flex }（特異度 1,1,1），
+   就會把 .tower-bar[hidden]（0,2,0）壓掉，hidden 屬性從此失效。 */
+body[data-mode="classic"] #tower-bar,
+body[data-mode="blitz"] #tower-bar {
+  display: none;
+}
+
+/* ==========================================================================
+   5. HUD：分數、倒數、得分浮動
+   ========================================================================== */
+
+.hud-panel {
+  position: relative;          /* .gain-float 的定位基準 */
+  width: 100%;
+  max-width: 440px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hud-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.score-box {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.score-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.score-value {
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* --- 加時閃電倒數列 --- */
+.blitz-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.blitz-bar[hidden] {
+  display: none;
+}
+
+.blitz-time {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  min-width: 4.2em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.blitz-track {
+  flex: 1 1 auto;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(74, 47, 25, 0.18);
+}
+
+/* 寬度的唯一來源是 JS 寫在本元素上的 --pct（值帶 % 單位，例如 style="--pct:62%"）。
+   JS 不得改 width 本身，才不會和這裡的 transition 打架。 */
+.blitz-fill {
+  height: 100%;
+  width: var(--pct, 100%);
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-secondary), var(--accent-primary));
+  transition: width var(--dur-normal) linear, background-color var(--dur-fast) var(--ease-out);
+}
+
+/* 剩餘時間低於 20%：轉紅並脈動。
+   .is-low 由 JS 在 refreshHud() 內依剩餘比例加／移除。 */
+.blitz-bar.is-low .blitz-fill {
+  background: linear-gradient(90deg, var(--danger), #ff8a73);
+  animation: lowTimePulse var(--dur-pulse) var(--ease-out) infinite;
+}
+
+.blitz-bar.is-low .blitz-time {
+  color: var(--danger);
+}
+
+/* --- 連鎖徽章 --- */
+.chain-badge {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--warning);
+  color: #3c2a1a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(217, 119, 6, 0.45);
+  animation: chainPop var(--dur-chain) var(--ease-spring);
+}
+
+.chain-badge[hidden] {
+  display: none;
+}
+
+/* --- 爬塔狀態列 ---------------------------------------------------------
+   四顆膠囊：樓層 / 步數 / 金幣 / 復活權，視覺語言比照上面的 .blitz-bar。
+   共通外觀寫在 .tower-bar > span（子選擇器，不新增任何 class），
+   四個 id 各自的個性色再用自己的 class 覆蓋。
+   flex-wrap 是窄螢幕的保險：真的塞不下時整列換行，不會把 HUD 撐爆。 */
+.tower-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tower-bar[hidden] {
+  display: none;
+}
+
+.tower-bar > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+
+/* 樓層徽章：整列的主角，吃剩餘寬度並用強調色 */
+.floor-badge {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+}
+
+:root[data-theme="dark"] .floor-badge,
+html[data-theme="dark"] .floor-badge {
+  background: var(--bg-tertiary);
+}
+
+.step-counter {
+  color: var(--text-main);
+}
+
+/* 剩餘步數低於 20%：轉紅並脈動，沿用閃電模式的 lowTimePulse 與 --dur-pulse。
+   .is-low 由 JS 在更新 HUD 時依剩餘比例加／移除（與 .blitz-bar.is-low 同一套規矩）。 */
+.step-counter.is-low {
+  color: var(--danger);
+  border-color: var(--danger);
+  animation: lowTimePulse var(--dur-pulse) var(--ease-out) infinite;
+}
+
+.gold-counter {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.revive-counter {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 沒有復活權時整顆收起來。(0,2,0) 壓得過 .tower-bar > span 的 (0,1,1)。 */
+.revive-counter[hidden] {
+  display: none;
+}
+
+/* --- 得分浮動（+16 往上飄並淡出） ---
+   靠切換 hidden 屬性來重播動畫：元素每次從 hidden 變回顯示都會重新開始動畫，
+   不需要額外的 class 開關，也不會有「動畫只播一次就再也不動」的老問題。 */
+.gain-float {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 5;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--success);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  animation: gainFloat var(--dur-gain) var(--ease-out) forwards;
+}
+
+.gain-float[hidden] {
+  display: none;
+}
+
+/* ==========================================================================
+   6. 棋盤外框與背景格
+   --------------------------------------------------------------------------
+   尺寸完全由 CSS 算，JS 只負責在 #board-frame 上寫 --n（3 / 4 / 5）。
+   三種盤面共用同一套規則，不需要任何 JS 量測。
+   ========================================================================== */
+
+.board-frame {
+  --n: 4;                 /* JS 會以 inline style 覆寫；這裡是預設值 */
+
+  /* --- 間距的單位為什麼是 cqi 而不是 % ---------------------------------
+     契約 §5 規定了兩條必須逐字照抄的公式：
+       .tile-layer { --tile-size: calc((100% - (var(--n) - 1) * var(--gap)) / var(--n)); }
+       .tile       { transform: translate(calc(var(--col) * (100% + var(--gap))), ...); }
+     這兩處的 100% 基準是「不同的盒子」：
+       前者在 width 裡，% 相對於 .tile-layer 的寬；
+       後者在 translate 裡，% 相對於 .tile 自己的寬（＝ --tile-size）。
+     所以只要 --gap 本身是百分比，它在兩處就會換算成兩個不同的長度：
+     以 n=4、gap=2.4% 為例，磚寬 = 23.2%，位移步距卻只有 23.2% × 1.024 = 23.76%，
+     最後一顆磚的右緣停在 94.5% —— 右下角永遠空一條、也對不上背景格。
+     改用容器查詢單位後，--gap 在兩處都是「同一個絕對長度」，
+     n × 磚寬 + (n-1) × 間距 恆等於 --tile-layer 的寬，三種盤面都精準密合。
+     2.4cqi 就是棋盤內容寬的 2.4%，數值與契約完全一致，只是換了能一致解析的單位。 */
+  --gap-n: 2.4;
+  --gap: calc(var(--gap-n) * 1cqi);
+  --pad: calc(var(--gap-n) * 1cqi);
+
+  position: relative;
+  /* 不用 vw：桌機出現捲軸時 96vw 會大於容器內容寬，導致 margin auto 失效、
+     棋盤靠左並被 body 的 overflow-x: hidden 裁掉右緣（黑白棋踩過的坑）。 */
+  width: 100%;
+  max-width: 440px;
+  aspect-ratio: 1;
+  margin: 0 auto 10px;
+  border-radius: var(--radius-lg);
+  background: var(--board-bg);
+  border: 2px solid var(--board-border);
+  box-shadow: inset 0 2px 12px var(--board-inner-shadow), var(--shadow-md);
+  /* 讓子層的 cqi 有對象可解析。container-type 只加在這一層，
+     所以 .board-frame 自己的屬性裡絕對不能用 cqi（容器不能查詢自己）。
+     --gap / --pad 只被 .board-grid / .tile-layer / .tile 使用，換算發生在子層，安全。 */
+  container-type: inline-size;
+}
+
+/* 滑動不能連帶捲動頁面：touch-action: none 交出所有預設手勢給 Pointer Events，
+   overscroll-behavior: contain 擋掉 iOS/Android 的橡皮筋與下拉重整。 */
+#board-frame {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+/* 撞牆微震：加在 .board-frame（整個盤面一起晃），不是加在磚塊上。
+   磚塊的 transform 兩層都各有主人，多一個動畫來源就會出現覆寫事故。 */
+.board-frame.is-shaking {
+  animation: boardShake var(--dur-shake) var(--ease-out);
+}
+
+/* --- 背景格：與磚塊層用同一組 --pad / --gap，因此天生對齊 --- */
+.board-grid {
+  position: absolute;
+  inset: var(--pad);
+  display: grid;
+  grid-template-columns: repeat(var(--n), 1fr);
+  grid-template-rows: repeat(var(--n), 1fr);
+  gap: var(--gap);
+  pointer-events: none;
+}
+
+.cell-bg {
+  border-radius: var(--radius-sm);
+  background: var(--cell-bg);
+  box-shadow: inset 0 1px 2px rgba(74, 47, 25, 0.08);
+}
+
+/* --- 磚塊層 --- */
+.tile-layer {
+  position: absolute;
+  inset: var(--pad);
+
+  /* 契約 §5 指定的公式，逐字照抄。用於 .tile 的 width / height。 */
+  --tile-size: calc((100% - (var(--n) - 1) * var(--gap)) / var(--n));
+
+  /* 同一個磚寬，但換成「不依賴百分比基準」的容器長度。
+     百分比無法用在 font-size（那裡的 % 是相對父層字級），
+     所以字級縮放一律以 --tile-len 為基準。兩者的數值恆等。 */
+  --tile-len: calc((100cqi - 2 * var(--pad) - (var(--n) - 1) * var(--gap)) / var(--n));
+}
+
+/* 動畫進行中鎖住互動（指標事件本來就靠 #board-frame 捕獲，
+   這裡是防止磚塊在快轉期間吃到多餘的 hover / 點擊）。 */
+.tile-layer.is-locked {
+  pointer-events: none;
+}
+
+/* --- 結束／達標覆蓋層 --- */
+.board-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  border-radius: inherit;
+  background: rgba(250, 244, 234, 0.82);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  color: var(--text-main);
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+:root[data-theme="dark"] .board-overlay,
+html[data-theme="dark"] .board-overlay {
+  background: rgba(23, 17, 13, 0.82);
+}
+
+.board-overlay[hidden] {
+  display: none;
+}
+
+/* ==========================================================================
+   7. 磚塊：transform 的兩層所有權
+   --------------------------------------------------------------------------
+   .tile      只負責「位移」。transform 由 CSS 獨佔，JS 只寫 --col / --row。
+   .tile-face 只負責「縮放」。所有 @keyframes 一律只掛在這一層。
+   JS 一律不得寫 element.style.transform。
+   --------------------------------------------------------------------------
+   為什麼一定要拆兩層：
+   @keyframes 裡的 transform 是「整份覆寫」而不是「疊加」。
+   黑白棋的 dropIn 只寫了 scale()，就把 .disc 的 base rotateY(180deg) 洗掉，
+   新落下的白子有 280ms 被畫成黑子。當時靠「拆成兩份 keyframes」修掉，
+   但 2048 有 17 階磚值，那個解法會爆炸成 17 份。
+   拆成兩層之後，位移與縮放各自有唯一的主人，keyframes 再怎麼寫都覆寫不到位移。
+   ========================================================================== */
+
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--tile-size);
+  height: var(--tile-size);
+  z-index: 2;
+  /* 位移：col * (磚寬 + 間距)。translate 的 % 相對自身尺寸，所以 100% 就是磚寬。 */
+  transform: translate(calc(var(--col) * (100% + var(--gap))),
+                       calc(var(--row) * (100% + var(--gap))));
+  transition: transform var(--slide-ms) var(--ease-slide);
+  will-change: transform;
+
+  /* 【禁止在這裡對 opacity 做過渡】
+     opacity 是 CSS 的 grouping property：只要出現 0 < opacity < 1 的中間值，
+     瀏覽器就會替該元素建立新的 stacking context，並把 transform-style 的
+     used value 強制降為 flat（3D 被壓平）。
+     黑白棋正是同時寫了 preserve-3d 與 transition: opacity，
+     讓「以為已經修好」的白子跳色 bug 其實還在。
+     磚塊的「出現感」由 .tile-face 的 scale 動畫（tileSpawn）提供，
+     完全不需要淡入 —— 請不要好心把 opacity 加回來。 */
+}
+
+.tile-face {
+  width: 100%;
+  height: 100%;
+  /* 這一層的 transform 只會有 scale 這一個成分，
+     所以 keyframes 直接寫 transform: scale() 也不會洗掉任何東西。
+     --sc 則提供「非動畫的靜態縮放」（例如 .is-dying），改值即可經由這條 transition 補間。 */
+  transform: scale(var(--sc, 1));
+  transition: transform var(--slide-ms) var(--ease-slide);
+
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--tile-bg, var(--cell-bg));
+  color: var(--tile-fg, var(--text-main));
+  box-shadow: var(--tile-ring, 0 0 0 0 transparent),
+              0 2px 6px rgba(74, 47, 25, 0.22);
+  font-family: var(--font-sans);
+  font-weight: 800;
+  line-height: 1;
+  /* 不支援容器查詢單位的舊瀏覽器，.tile-num / .tile-glyph 的 cqi 字級會失效並
+     回退成繼承 —— 繼承來源就是這裡，所以一定要給一個能看的預設字級。 */
+  font-size: 1.4rem;
+  overflow: visible;
+}
+
+/* 合併彈跳（POP_MS）與生成彈入（SPAWN_MS）：
+   只掛在 .tile-face，且只動 scale。 */
+.tile.is-merged .tile-face {
+  animation: tilePop var(--pop-ms) var(--ease-spring);
+}
+
+.tile.is-new .tile-face {
+  animation: tileSpawn var(--spawn-ms) var(--ease-spring);
+}
+
+/* 被合併掉的那顆：滑到目的地的同時微縮，並沉到存活者底下。
+   不做淡出 —— 它整顆會被存活者蓋住，而且 opacity 過渡是明文禁止的。 */
+.tile.is-dying {
+  z-index: 1;
+}
+
+.tile.is-dying .tile-face {
+  --sc: 0.88;
+}
+
+/* 剛合併出來的那顆浮到最上層，彈跳才不會被鄰居切到 */
+.tile.is-merged {
+  z-index: 3;
+}
+
+/* --- 磚上的內容 --- */
+.tile-glyph,
+.tile-num {
+  grid-area: 1 / 1;
+  justify-self: center;
+  align-self: center;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 預設（含 data-skin 缺失時）藏起圖示、只顯示數字 */
+.tile-glyph {
+  display: none;
+}
+
+.tile-num {
+  /* 字級 = 位數係數 × 磚寬。--num-fs 由 data-level 決定（見 §8）。 */
+  font-size: calc(var(--num-fs, 0.42) * var(--tile-len));
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ==========================================================================
+   8. 磚塊配色與位數字級
+   --------------------------------------------------------------------------
+   規則順序很重要：先寫 data-level（1~17 全值域保底），再寫 data-value（2~2048 精確）。
+   兩者特異度同為 (0,1,0)，同分時後寫的贏 —— 所以精確配色一定要放在保底之後。
+   若只寫 data-value，4096 以上的磚會因為沒有任何規則命中而變成透明背景。
+   --------------------------------------------------------------------------
+   多位數字級縮放的設計：
+   不另外要求 JS 寫 data-len 這種新屬性（契約 §8 的 hook 表是精確集合，
+   自行新增 hook 正是上一款遊戲翻車的原因）。
+   位數本來就是面值的函數：value = 2^level，位數 = floor(log10(2^level)) + 1，
+   因此只要 data-level 就能唯一決定位數，不必再多一個屬性：
+     level 1~3   (2,4,8)                  → 1 位 → --num-fs: 0.46
+     level 4~6   (16,32,64)               → 2 位 → 0.42
+     level 7~9   (128,256,512)            → 3 位 → 0.33
+     level 10~13 (1024,2048,4096,8192)    → 4 位 → 0.26
+     level 14~16 (16384,32768,65536)      → 5 位 → 0.21
+     level 17    (131072)                 → 6 位 → 0.175
+   基準是 --tile-len（＝磚寬的絕對長度），所以 3×3 / 4×4 / 5×5 三種盤面
+   都會自動等比例縮放，不需要任何斷點或 JS 量測。
+   ========================================================================== */
+
+/* --- A. 全值域保底：level 1 ~ 17（MAX_LEVEL） --- */
+.tile[data-level="1"]  { --tile-bg: #efe4d7; --tile-fg: #6b4f35; --num-fs: 0.46; }
+.tile[data-level="2"]  { --tile-bg: #e8d3b4; --tile-fg: #6b4f35; --num-fs: 0.46; }
+.tile[data-level="3"]  { --tile-bg: #f2b179; --tile-fg: #ffffff; --num-fs: 0.46; }
+.tile[data-level="4"]  { --tile-bg: #f08e52; --tile-fg: #ffffff; --num-fs: 0.42; }
+.tile[data-level="5"]  { --tile-bg: #ef6c4d; --tile-fg: #ffffff; --num-fs: 0.42; }
+.tile[data-level="6"]  { --tile-bg: #e2493c; --tile-fg: #ffffff; --num-fs: 0.42; }
+.tile[data-level="7"]  { --tile-bg: #d6408f; --tile-fg: #ffffff; --num-fs: 0.33; }
+.tile[data-level="8"]  { --tile-bg: #9b4fd6; --tile-fg: #ffffff; --num-fs: 0.33; }
+.tile[data-level="9"]  { --tile-bg: #5b62e0; --tile-fg: #ffffff; --num-fs: 0.33; }
+.tile[data-level="10"] { --tile-bg: #1c93b8; --tile-fg: #ffffff; --num-fs: 0.26; }
+.tile[data-level="11"] { --tile-bg: #f0b429; --tile-fg: #4a3208; --num-fs: 0.26; }
+.tile[data-level="12"] { --tile-bg: #10b981; --tile-fg: #ffffff; --num-fs: 0.26; }
+.tile[data-level="13"] {
+  --tile-bg: #0f172a;
+  --tile-fg: #f5c542;
+  --tile-ring: inset 0 0 0 2px #f5c542;
+  --num-fs: 0.26;
+}
+.tile[data-level="14"] {
+  --tile-bg: linear-gradient(135deg, #f472b6 0%, #a855f7 52%, #38bdf8 100%);
+  --tile-fg: #ffffff;
+  --num-fs: 0.21;
+}
+.tile[data-level="15"] {
+  --tile-bg: linear-gradient(135deg, #fbbf24 0%, #f472b6 38%, #8b5cf6 70%, #22d3ee 100%);
+  --tile-fg: #ffffff;
+  --num-fs: 0.21;
+}
+.tile[data-level="16"] {
+  --tile-bg: linear-gradient(135deg, #22d3ee 0%, #a3e635 34%, #fbbf24 68%, #fb7185 100%);
+  --tile-fg: #ffffff;
+  --num-fs: 0.21;
+}
+.tile[data-level="17"] {
+  --tile-bg: conic-gradient(from 210deg, #f43f5e, #f59e0b, #84cc16, #06b6d4, #6366f1, #d946ef, #f43f5e);
+  --tile-fg: #ffffff;
+  --num-fs: 0.175;
+}
+
+/* 虹彩階（14 以上）：底色花，字加描邊陰影才看得清楚 */
+.tile[data-level="14"] .tile-face,
+.tile[data-level="15"] .tile-face,
+.tile[data-level="16"] .tile-face,
+.tile[data-level="17"] .tile-face {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 0 10px rgba(0, 0, 0, 0.35);
+}
+
+/* --- B. 精確配色：data-value 2 ~ 2048（放在保底之後，同分後寫者勝） --- */
+.tile[data-value="2"]    { --tile-bg: #efe4d7; --tile-fg: #6b4f35; }
+.tile[data-value="4"]    { --tile-bg: #e8d3b4; --tile-fg: #6b4f35; }
+.tile[data-value="8"]    { --tile-bg: #f2b179; --tile-fg: #ffffff; }
+.tile[data-value="16"]   { --tile-bg: #f08e52; --tile-fg: #ffffff; }
+.tile[data-value="32"]   { --tile-bg: #ef6c4d; --tile-fg: #ffffff; }
+.tile[data-value="64"]   { --tile-bg: #e2493c; --tile-fg: #ffffff; }
+.tile[data-value="128"]  { --tile-bg: #d6408f; --tile-fg: #ffffff; }
+.tile[data-value="256"]  { --tile-bg: #9b4fd6; --tile-fg: #ffffff; }
+.tile[data-value="512"]  { --tile-bg: #5b62e0; --tile-fg: #ffffff; }
+.tile[data-value="1024"] { --tile-bg: #1c93b8; --tile-fg: #ffffff; }
+.tile[data-value="2048"] { --tile-bg: #f0b429; --tile-fg: #4a3208; }
+
+/* --- C. 2048 榮耀金：光暈脈動 ---
+   刻意做在 .tile-face::after 上，而不是給 .tile-face 再掛一個 animation。
+   animation 是單一屬性，如果榮耀脈動和 tilePop / tileSpawn 都寫在 .tile-face，
+   兩者會互相整份覆蓋（合併當下脈動會突然停掉）。偽元素各自獨立，永不打架。 */
+.tile[data-value="2048"] .tile-face::after,
+.tile[data-level="11"] .tile-face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: goldGlow var(--dur-glow) var(--ease-out) infinite;
+}
+
+/* --- D. 深色主題：整組覆寫，降低亮度並維持文字對比 --- */
+:root[data-theme="dark"] .tile[data-level="1"],
+html[data-theme="dark"] .tile[data-level="1"]  { --tile-bg: #4e4034; --tile-fg: #f0e2cf; }
+:root[data-theme="dark"] .tile[data-level="2"],
+html[data-theme="dark"] .tile[data-level="2"]  { --tile-bg: #5d4b38; --tile-fg: #f5e8d2; }
+:root[data-theme="dark"] .tile[data-level="3"],
+html[data-theme="dark"] .tile[data-level="3"]  { --tile-bg: #c2854e; --tile-fg: #241708; }
+:root[data-theme="dark"] .tile[data-level="4"],
+html[data-theme="dark"] .tile[data-level="4"]  { --tile-bg: #bf6f3c; --tile-fg: #fff3e6; }
+:root[data-theme="dark"] .tile[data-level="5"],
+html[data-theme="dark"] .tile[data-level="5"]  { --tile-bg: #c2533a; --tile-fg: #ffeee9; }
+:root[data-theme="dark"] .tile[data-level="6"],
+html[data-theme="dark"] .tile[data-level="6"]  { --tile-bg: #b23a2f; --tile-fg: #ffeceb; }
+:root[data-theme="dark"] .tile[data-level="7"],
+html[data-theme="dark"] .tile[data-level="7"]  { --tile-bg: #a8326f; --tile-fg: #ffe9f4; }
+:root[data-theme="dark"] .tile[data-level="8"],
+html[data-theme="dark"] .tile[data-level="8"]  { --tile-bg: #7a3daa; --tile-fg: #f4e9ff; }
+:root[data-theme="dark"] .tile[data-level="9"],
+html[data-theme="dark"] .tile[data-level="9"]  { --tile-bg: #454bb0; --tile-fg: #e9ebff; }
+:root[data-theme="dark"] .tile[data-level="10"],
+html[data-theme="dark"] .tile[data-level="10"] { --tile-bg: #17738f; --tile-fg: #e4f6fd; }
+:root[data-theme="dark"] .tile[data-level="11"],
+html[data-theme="dark"] .tile[data-level="11"] { --tile-bg: #d99c1f; --tile-fg: #3a2606; }
+:root[data-theme="dark"] .tile[data-level="12"],
+html[data-theme="dark"] .tile[data-level="12"] { --tile-bg: #0d9268; --tile-fg: #eafff7; }
+:root[data-theme="dark"] .tile[data-level="13"],
+html[data-theme="dark"] .tile[data-level="13"] { --tile-bg: #060b16; --tile-fg: #f5c542; }
+:root[data-theme="dark"] .tile[data-level="14"],
+html[data-theme="dark"] .tile[data-level="14"] {
+  --tile-bg: linear-gradient(135deg, #c2568f 0%, #7c3fb0 52%, #2a86b5 100%);
+}
+:root[data-theme="dark"] .tile[data-level="15"],
+html[data-theme="dark"] .tile[data-level="15"] {
+  --tile-bg: linear-gradient(135deg, #c7931c 0%, #c2568f 38%, #6a43b8 70%, #1b9db0 100%);
+}
+:root[data-theme="dark"] .tile[data-level="16"],
+html[data-theme="dark"] .tile[data-level="16"] {
+  --tile-bg: linear-gradient(135deg, #1b9db0 0%, #7fad2a 34%, #c7931c 68%, #c4546a 100%);
+}
+:root[data-theme="dark"] .tile[data-level="17"],
+html[data-theme="dark"] .tile[data-level="17"] {
+  --tile-bg: conic-gradient(from 210deg, #bd3149, #c2841a, #6ba312, #0b90a5, #4d52bd, #ad34bf, #bd3149);
+}
+
+/* 深色主題的精確值（同樣放在 level 之後才蓋得住） */
+:root[data-theme="dark"] .tile[data-value="2"],
+html[data-theme="dark"] .tile[data-value="2"]    { --tile-bg: #4e4034; --tile-fg: #f0e2cf; }
+:root[data-theme="dark"] .tile[data-value="4"],
+html[data-theme="dark"] .tile[data-value="4"]    { --tile-bg: #5d4b38; --tile-fg: #f5e8d2; }
+:root[data-theme="dark"] .tile[data-value="8"],
+html[data-theme="dark"] .tile[data-value="8"]    { --tile-bg: #c2854e; --tile-fg: #241708; }
+:root[data-theme="dark"] .tile[data-value="16"],
+html[data-theme="dark"] .tile[data-value="16"]   { --tile-bg: #bf6f3c; --tile-fg: #fff3e6; }
+:root[data-theme="dark"] .tile[data-value="32"],
+html[data-theme="dark"] .tile[data-value="32"]   { --tile-bg: #c2533a; --tile-fg: #ffeee9; }
+:root[data-theme="dark"] .tile[data-value="64"],
+html[data-theme="dark"] .tile[data-value="64"]   { --tile-bg: #b23a2f; --tile-fg: #ffeceb; }
+:root[data-theme="dark"] .tile[data-value="128"],
+html[data-theme="dark"] .tile[data-value="128"]  { --tile-bg: #a8326f; --tile-fg: #ffe9f4; }
+:root[data-theme="dark"] .tile[data-value="256"],
+html[data-theme="dark"] .tile[data-value="256"]  { --tile-bg: #7a3daa; --tile-fg: #f4e9ff; }
+:root[data-theme="dark"] .tile[data-value="512"],
+html[data-theme="dark"] .tile[data-value="512"]  { --tile-bg: #454bb0; --tile-fg: #e9ebff; }
+:root[data-theme="dark"] .tile[data-value="1024"],
+html[data-theme="dark"] .tile[data-value="1024"] { --tile-bg: #17738f; --tile-fg: #e4f6fd; }
+:root[data-theme="dark"] .tile[data-value="2048"],
+html[data-theme="dark"] .tile[data-value="2048"] { --tile-bg: #d99c1f; --tile-fg: #3a2606; }
+
+/* --- E. 🧊 冰塊磚（爬塔模式） -----------------------------------------------
+   冰塊是 value 0 的特殊磚，hook 是「屬性」而不是 class：JS 在那顆 .tile 上寫
+   data-ice（有這個屬性就算，值寫什麼都行）。用屬性的兩個理由：
+     1. 冰塊的外觀 100% 由 CSS 決定，JS 不需要為了視覺再多背一個 class 名字；
+     2. 契約的雙向涵蓋測試會掃 class，少一個 class 就少一個對不上的風險。
+
+   為什麼整段要放在 §8 A~D 之後：
+   .tile[data-ice] 與 .tile[data-level="n"] 同為 (0,2,0)，同分時後寫者勝，
+   所以冰塊一定壓得過保底配色（不管 JS 有沒有順手寫 data-level="0"）。
+   深色主題的覆寫則同樣加上 :root[data-theme="dark"]（0,3,0）壓回來。
+
+   內容全藏：不管 JS 在 .tile-face 裡放了數字還是圖示，冰塊都只會顯示這裡畫的霜面，
+   所以「冰塊長什麼樣」只有 CSS 一份真相，不會兩邊各畫一半。 */
+.tile[data-ice] {
+  --tile-bg: linear-gradient(150deg, #eaf7ff 0%, #c3e4f7 46%, #a4d2ef 100%);
+  --tile-fg: #245c7d;
+  --num-fs: 0.42;
+}
+
+.tile[data-ice] .tile-face {
+  /* 霜紋質感：兩組交錯的細斜紋 + 左上高光，疊在冰藍底色上。
+     半透明只發生在「磚面內部的漸層」，.tile 本身的 opacity 一律不碰。 */
+  background-color: #cde8f8;
+  background-image:
+    linear-gradient(152deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0) 44%),
+    repeating-linear-gradient(58deg, rgba(255, 255, 255, 0.52) 0 2px, rgba(255, 255, 255, 0) 2px 9px),
+    repeating-linear-gradient(-58deg, rgba(255, 255, 255, 0.30) 0 2px, rgba(255, 255, 255, 0) 2px 13px),
+    linear-gradient(150deg, #eaf7ff 0%, #c3e4f7 46%, #a4d2ef 100%);
+  color: var(--tile-fg);
+  /* 內圈白框 + 底部的厚度陰影 ＝「一塊實心冰」而不是「一張藍卡片」 */
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.75),
+    inset 0 -7px 14px rgba(52, 122, 160, 0.32),
+    inset 0 5px 10px rgba(255, 255, 255, 0.55),
+    0 2px 6px rgba(40, 90, 120, 0.32);
+  /* 「推不動」的第一眼線索：滑鼠停上去就是禁止符號 */
+  cursor: not-allowed;
+}
+
+/* 雪花印記。用 \2744 的碼位跳脫而不是直接貼字元，
+   CSS 檔沒有 @charset 時才不會依賴外層文件的編碼推斷。 */
+.tile[data-ice] .tile-face::after {
+  content: '\2744';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  pointer-events: none;
+  font-size: calc(0.46 * var(--tile-len));
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(30, 84, 116, 0.55);
+  animation: frostBreathe var(--dur-frost) var(--ease-out) infinite;
+}
+
+/* 冰塊沒有面值，數字與進化圖示一律不顯示。
+   (0,3,0) 壓得過 §9 的 html[data-skin="..."] .tile-num（0,2,1）
+   與 body[data-glyph-only] .tile-glyph（0,2,1）。 */
+.tile[data-ice] .tile-num,
+.tile[data-ice] .tile-glyph {
+  display: none;
+}
+
+/* 深色主題：冰塊改成夜色寒潭，白霜換成低飽和的冷光 */
+:root[data-theme="dark"] .tile[data-ice],
+html[data-theme="dark"] .tile[data-ice] {
+  --tile-bg: linear-gradient(150deg, #41708c 0%, #2a536f 48%, #1b3c52 100%);
+  --tile-fg: #d8eefc;
+}
+
+:root[data-theme="dark"] .tile[data-ice] .tile-face,
+html[data-theme="dark"] .tile[data-ice] .tile-face {
+  background-color: #2c566f;
+  background-image:
+    linear-gradient(152deg, rgba(226, 245, 255, 0.34) 0%, rgba(226, 245, 255, 0) 44%),
+    repeating-linear-gradient(58deg, rgba(226, 245, 255, 0.24) 0 2px, rgba(226, 245, 255, 0) 2px 9px),
+    repeating-linear-gradient(-58deg, rgba(226, 245, 255, 0.14) 0 2px, rgba(226, 245, 255, 0) 2px 13px),
+    linear-gradient(150deg, #41708c 0%, #2a536f 48%, #1b3c52 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(198, 232, 250, 0.36),
+    inset 0 -7px 14px rgba(0, 0, 0, 0.42),
+    inset 0 5px 10px rgba(198, 232, 250, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark"] .tile[data-ice] .tile-face::after,
+html[data-theme="dark"] .tile[data-ice] .tile-face::after {
+  color: rgba(216, 238, 252, 0.86);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* --- F. 🔨 敲碎模式 ---------------------------------------------------------
+   JS 在 #tile-layer 上加 .is-smashing，玩家點任一顆磚（含冰塊）把它敲掉。
+   提示畫在 .tile-face::before 而不是 .tile-face 自己：
+   .tile-face 的 animation 已經被 tilePop / tileSpawn 佔用，
+   animation 是單一屬性、會整份互相覆寫，偽元素才各自獨立。
+   這一段放在冰塊之後，cursor 才蓋得過冰塊的 not-allowed（同為 0,3,0，後寫者勝）。 */
+.tile-layer.is-smashing {
+  cursor: crosshair;
+}
+
+.tile-layer.is-smashing .tile {
+  cursor: pointer;
+}
+
+.tile-layer.is-smashing .tile-face {
+  cursor: pointer;
+}
+
+.tile-layer.is-smashing .tile-face::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 2px dashed var(--danger);
+  animation: smashHint var(--dur-smash) var(--ease-out) infinite;
+}
+
+/* ==========================================================================
+   9. 皮膚：數字 / 進化 / 純圖示
+   --------------------------------------------------------------------------
+   排序決定行為，請勿調動：
+     基礎 (.tile-glyph 隱藏)
+       → html[data-skin="number"]   (0,2,1)
+       → html[data-skin="evolve"]   (0,2,1)
+       → body[data-glyph-only]      (0,2,1)  ← 最後寫，同分時勝出
+   純圖示模式因此在「兩種皮膚底下」都保證會顯示圖示、藏起數字。
+   ========================================================================== */
+
+html[data-skin="number"] .tile-glyph {
+  display: none;
+}
+
+html[data-skin="number"] .tile-num {
+  display: block;
+  position: static;
+  font-size: calc(var(--num-fs, 0.42) * var(--tile-len));
+  opacity: 1;
+}
+
+html[data-skin="evolve"] .tile-glyph {
+  display: block;
+  font-size: calc(0.52 * var(--tile-len));
+  /* 部分平台的 emoji 會被基線推歪，微調回視覺中心 */
+  transform: translateY(-2%);
+}
+
+/* 進化皮膚：數字縮到右下角當註解 */
+html[data-skin="evolve"] .tile-num {
+  position: absolute;
+  right: 7%;
+  bottom: 5%;
+  justify-self: end;
+  align-self: end;
+  font-size: calc(var(--num-fs, 0.42) * var(--tile-len) * 0.5);
+  opacity: 0.82;
+}
+
+/* 純圖示：連右下角的數字也收掉，只留圖示置中放大。
+   （.tile 的 aria-label 一律報數字，所以報讀軟體不受影響。） */
+body[data-glyph-only] .tile-glyph {
+  display: block;
+  font-size: calc(0.52 * var(--tile-len));
+}
+
+body[data-glyph-only] .tile-num {
+  display: none;
+}
+
+/* ==========================================================================
+   10. 底部拇指動作列
+   ========================================================================== */
+
+.thumb-action-bar {
+  position: fixed;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1.5px solid var(--border-color);
+  padding: 6px 12px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+  max-width: calc(100% - 24px);
+}
+
+.action-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--dur-fast) var(--ease-out);
+  white-space: nowrap;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-primary);
+}
+
+.action-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.7);
+}
+
+.action-btn .btn-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.action-btn[aria-pressed="true"] {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+
+.btn-badge {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  background: var(--accent-primary);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 2px solid var(--bg-secondary);
+  line-height: 1.3;
+  font-family: var(--font-mono);
+}
+
+.action-btn:disabled .btn-badge {
+  background: var(--text-muted);
+}
+
+/* ==========================================================================
+   11. 彈窗
+   ========================================================================== */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(40, 25, 12, 0.66);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 瀏海／圓角機的安全區：商店卡片是四邊貼滿的格線，橫放時最容易被切到，
+     所以四邊都取 max(16px, 安全區)。不支援 env() 的瀏覽器會整條宣告失效，
+     由上一行的 padding: 16px 接手。 */
+  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-modal) var(--ease-out);
+}
+
+/* 雙軌制：hidden 屬性管可及性（整個移出可及性樹），.open 管進場動畫 */
+.modal-overlay[hidden] {
+  display: none;
+}
+
+.modal-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  max-width: 460px;
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(20px) scale(0.95);
+  transition: transform var(--dur-modal) var(--ease-spring);
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow-y: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.modal-overlay.open .modal-box {
+  transform: translateY(0) scale(1);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.modal-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.4rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+}
+
+.modal-close-btn:hover {
+  color: var(--text-main);
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.modal-body h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--accent-primary);
+  margin-top: 4px;
+}
+
+.modal-body ul,
+.modal-body ol {
+  padding-left: 1.25em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-body code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+
+.modal-body strong {
+  color: var(--accent-primary);
+  font-weight: 800;
+}
+
+.modal-footer {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  background: var(--accent-primary);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: var(--dur-fast) var(--ease-out);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  padding: 10px 18px;
+  background: var(--bg-tertiary);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: var(--dur-fast) var(--ease-out);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-primary);
+  border-color: var(--accent-primary);
+}
+
+.btn-secondary[hidden] {
+  display: none;
+}
+
+/* --- 結算彈窗 --- */
+.result-emoji {
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.result-detail {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+/* --- 戰績格線（結算與戰績彈窗共用） --- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.stat-item {
+  background: var(--bg-primary);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.stat-val {
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--accent-primary);
+  margin-top: 4px;
+  word-break: break-all;
+}
+
+#stats-size-tabs {
+  margin-bottom: 2px;
+}
+
+/* --- 層間商店（爬塔模式） ------------------------------------------------
+   視覺骨架借自掃雷地宮的商店，配色整組換成 2048 的暖棕系。
+   卡片本體由 JS 依 SHOP_ITEMS 生成，HTML 只留空的 #shop-items 容器，
+   所以這裡的 .shop-card / .shop-buy-btn / .icon / .title / .desc / .price
+   全部是「JS 必須照樣輸出」的約定，不能單方面改名。 */
+.shop-lead {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+/* .modal-body strong 是 (0,1,1)，光靠 .shop-gold (0,1,0) 蓋不過去，
+   所以刻意寫成兩段 (0,2,0)。 */
+.modal-body .shop-gold {
+  font-family: var(--font-mono);
+  color: var(--warning);
+  font-weight: 800;
+}
+
+.shop-items-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.shop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px 10px;
+  text-align: center;
+  background: var(--bg-primary);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.shop-card:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.shop-card .icon {
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.shop-card .title {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.shop-card .desc {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  min-height: 2.9em;      /* 六張卡的說明長短不一，先鎖高度讓按鈕齊平 */
+}
+
+.shop-card .price {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--warning);
+}
+
+.shop-buy-btn {
+  width: 100%;
+  margin-top: 2px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--dur-fast) var(--ease-out);
+}
+
+.shop-buy-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.shop-buy-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.shop-buy-btn:focus-visible {
+  outline: 3px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* 買不起、或 max 已經買滿：按鈕與整張卡一起變灰。
+   兩種情況都只靠 disabled 屬性表達，不需要額外的 class。 */
+.shop-buy-btn:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+
+.shop-card:has(.shop-buy-btn:disabled) {
+  opacity: 0.55;
+}
+
+.shop-card:has(.shop-buy-btn:disabled):hover {
+  border-color: var(--border-color);
+  transform: none;
+  box-shadow: none;
+}
+
+/* ==========================================================================
+   12. Toast 訊息
+   ========================================================================== */
+
+.toast-container {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 2000;
+  pointer-events: none;
+  width: max-content;
+  max-width: calc(100% - 32px);
+}
+
+.toast-msg {
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--accent-primary);
+  color: var(--text-main);
+  padding: 8px 18px;
+  border-radius: var(--radius-xl);
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: var(--shadow-md);
+  animation: toastIn var(--dur-toast) var(--ease-spring);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+/* ==========================================================================
+   13. 動畫關鍵影格
+   --------------------------------------------------------------------------
+   tilePop / tileSpawn 只會被掛到 .tile-face 上，而 .tile-face 的 base transform
+   只有 scale 一個成分 —— 覆寫它不會遺失任何資訊。
+   .tile 的位移 transform 在另一層，任何 keyframes 都碰不到。
+   ========================================================================== */
+
+@keyframes tilePop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes tileSpawn {
+  0%   { transform: scale(0.28); }
+  70%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* 2048 榮耀金光暈：畫在 .tile-face::after，只動 box-shadow，不碰 transform */
+@keyframes goldGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.55); }
+  50%      { box-shadow: 0 0 18px 5px rgba(240, 180, 41, 0.62); }
+}
+
+/* 撞牆微震：作用在 .board-frame，本層沒有 base transform，可安全覆寫 */
+@keyframes boardShake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-4px); }
+  45%      { transform: translateX(4px); }
+  70%      { transform: translateX(-2px); }
+  88%      { transform: translateX(2px); }
+}
+
+@keyframes lowTimePulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* 冰塊的雪花呼吸：畫在 .tile[data-ice] .tile-face::after 上。
+   偽元素有自己的 transform，動到它不會碰到 .tile-face 的 scale，
+   更不可能碰到 .tile 的位移。 */
+@keyframes frostBreathe {
+  0%, 100% { transform: scale(0.94); opacity: 0.78; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+
+/* 敲碎模式的「這顆可以點」提示：同樣只動 .tile-face::before 的透明度，
+   讓虛線外框一明一暗，不搶任何一層的 transform。 */
+@keyframes smashHint {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+@keyframes chainPop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes gainFloat {
+  0%   { transform: translateY(6px); opacity: 0; }
+  22%  { transform: translateY(0); opacity: 1; }
+  70%  { transform: translateY(-14px); opacity: 1; }
+  100% { transform: translateY(-26px); opacity: 0; }
+}
+
+@keyframes toastIn {
+  0%   { transform: translateY(-16px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* ==========================================================================
+   14. 響應式
+   --------------------------------------------------------------------------
+   棋盤一律 width: 100% + max-width，絕不用 vw，寬度由 .page-container 的
+   左右 padding 決定。這樣 margin auto 永遠有效、也不會被 overflow-x: hidden 裁掉。
+   ========================================================================== */
+
+@media (max-width: 480px) {
+  .main-title {
+    font-size: 1.32rem;
+    gap: 6px;
+  }
+
+  .main-title-badge {
+    font-size: 0.66rem;
+    padding: 2px 6px;
+  }
+
+  .hud-panel {
+    padding: 8px 10px;
+  }
+
+  .score-value {
+    font-size: 1.05rem;
+  }
+
+  .modal-box {
+    padding: 18px 16px;
+  }
+
+  .shop-items-grid {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .page-container {
+    /* 左右各留 10px，棋盤跟著容器內容寬走 */
+    padding: 10px 10px 96px;
+  }
+
+  /* 三個模式分頁擠在 400px 內：左右 padding 先讓，字級維持可讀 */
+  .mode-tab-btn {
+    padding: 8px 5px;
+    font-size: 0.82rem;
+    gap: 4px;
+  }
+
+  /* 爬塔狀態列：膠囊縮一號，四顆仍排得下一行；真的塞不下才靠 flex-wrap 換行 */
+  .tower-bar {
+    gap: 5px;
+  }
+
+  .tower-bar > span {
+    padding: 3px 7px;
+    font-size: 0.72rem;
+    min-height: 24px;
+  }
+
+  .floor-badge {
+    font-size: 0.74rem;
+  }
+
+  /* 商店維持兩欄（一欄會讓彈窗變得很長），改縮卡片內距與字級 */
+  .shop-card {
+    padding: 10px 7px 8px;
+    gap: 3px;
+  }
+
+  .shop-card .icon {
+    font-size: 1.35rem;
+  }
+
+  .shop-card .title {
+    font-size: 0.84rem;
+  }
+
+  .shop-card .desc {
+    font-size: 0.68rem;
+    min-height: 3.2em;
+  }
+
+  .shop-buy-btn {
+    padding: 7px 4px;
+    font-size: 0.75rem;
+  }
+
+  .size-btn {
+    padding: 6px 12px;
+  }
+
+  .thumb-action-bar {
+    gap: 4px;
+    padding: 5px 8px;
+  }
+
+  .action-btn {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 46px;
+    padding: 6px;
+  }
+
+  /* 底部動作列收成只剩 icon —— 特異度推算（這正是黑白棋翻車的地方）：
+       .action-btn > span:not(.btn-icon):not(.btn-badge)
+         = .action-btn(0,1,0) + :not(.btn-icon)(0,1,0) + :not(.btn-badge)(0,1,0) + span(0,0,1)
+         = (0,3,1)
+     關鍵不在「分數高」，而在「.btn-badge 根本不會被這條選擇器命中」：
+     :not(.btn-badge) 直接把徽章排除在匹配之外，所以 .btn-badge 自己的
+     position: absolute（(0,1,0)）不必跟任何人比大小就穩穩生效。
+     黑白棋當初寫成 .action-btn > span:not(.btn-icon)，(0,2,1) 會命中徽章，
+     再想用 .action-btn .btn-badge（(0,2,0)）救回來就輸了一分，
+     手機上永遠看不到悔棋剩餘次數。這裡不靠 !important，靠「不命中」。 */
+  .action-btn > span:not(.btn-icon):not(.btn-badge) {
+    display: none;
+  }
+
+  .blitz-time {
+    font-size: 0.92rem;
+    min-width: 3.8em;
+  }
+
+  .toast-container {
+    top: 52px;
+  }
+}
+
+@media (max-width: 360px) {
+  .page-container {
+    padding: 8px 8px 92px;
+  }
+
+  .main-title {
+    font-size: 1.15rem;
+  }
+
+  .top-actions {
+    gap: 4px;
+  }
+
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 0.98rem;
+  }
+
+  .back-btn {
+    padding: 8px 10px;
+    font-size: 0.84rem;
+  }
+
+  .score-label {
+    font-size: 0.64rem;
+  }
+
+  .score-value {
+    font-size: 0.96rem;
+  }
+
+  .thumb-action-bar {
+    gap: 3px;
+    padding: 4px 6px;
+  }
+
+  .action-btn {
+    flex-basis: 44px;
+    width: 44px;
+  }
+
+  .chain-badge {
+    font-size: 0.66rem;
+    padding: 2px 6px;
+  }
+
+  /* 三個分頁在 360px 以下必須再讓一次，否則「🎯 經典無盡」會被切字 */
+  .mode-tab-btn {
+    padding: 8px 3px;
+    font-size: 0.74rem;
+    gap: 3px;
+  }
+
+  .tower-bar {
+    gap: 4px;
+  }
+
+  .tower-bar > span {
+    padding: 2px 6px;
+    font-size: 0.67rem;
+    min-height: 22px;
+  }
+
+  .floor-badge {
+    font-size: 0.7rem;
+  }
+
+  /* 360px 以下兩欄卡片只剩約 130px，說明文字會擠成一團，改單欄 */
+  .shop-items-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .shop-card {
+    /* 單欄時改成橫向排版：圖示在左，文字與按鈕在右，才不會一張卡佔掉半個螢幕 */
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      'icon title'
+      'icon desc'
+      'icon price'
+      'buy  buy';
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 10px;
+  }
+
+  .shop-card .icon {
+    grid-area: icon;
+    font-size: 1.7rem;
+  }
+
+  .shop-card .title {
+    grid-area: title;
+  }
+
+  .shop-card .desc {
+    grid-area: desc;
+    min-height: 0;
+  }
+
+  .shop-card .price {
+    grid-area: price;
+  }
+
+  .shop-buy-btn {
+    grid-area: buy;
+    margin-top: 6px;
+  }
+}
+
+/* ==========================================================================
+   15. 降低動態效果
+   --------------------------------------------------------------------------
+   時長歸零用 var(--dur-none)，不在此處硬寫數字，
+   以免被契約 §6「animation: / transition: 後面不得接裸數字」的掃描誤判。
+   注意：JS 的 commit 仍然靠 setTimeout(SLIDE_MS) 收尾，
+   動畫歸零不會影響邏輯正確性，只是視覺上瞬間到位。
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: var(--dur-none) !important;
+    animation-delay: var(--delay-none) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-none) !important;
+    transition-delay: var(--delay-none) !important;
+  }
+
+  body::before {
+    opacity: 0.35;
+  }
+}

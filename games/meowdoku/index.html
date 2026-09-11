@@ -5,22 +5,21 @@
     <meta charset="UTF-8">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" id="themeColor" content="#fdfbff">
+    <meta name="theme-color" id="themeColor" content="#fdfbff" data-theme-color-dark="#16121d"
+        data-theme-color-light="#fdfbff">
     <meta name="description" content="在每一色塊、每行、每列各放一隻貓咪的療癒邏輯遊戲。">
     <title>Meowdoku 貓咪數獨</title>
+    <!-- 防閃爍：內容逐字取自 BoboTheme.ANTI_FLASH_SNIPPET，必須 inline 且排在樣式表之前，請勿改寫 -->
     <script>
-        // 在樣式表之前就定好主題，避免深色使用者進頁面閃一下白畫面
-        (() => {
-            try {
-                const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-                const local = localStorage.getItem('meowdoku-dark-mode-v1');
-                const preferred = ['dark', 'light'].includes(prefs.theme)
-                    ? prefs.theme
-                    : (local === null ? null : (local === 'true' ? 'dark' : 'light'));
-                document.documentElement.dataset.theme = preferred
-                    || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-            } catch (_) { }
-        })();
+(() => {
+  try {
+    const homePref = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
+    const theme = ['dark', 'light'].includes(homePref.theme)
+      ? homePref.theme
+      : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+  } catch (_) {}
+})();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -153,6 +152,7 @@
         </div>
     </div>
 
+    <script src="../../assets/js/bobo-theme.js"></script>
     <script src="../../assets/js/stats.js"></script>
     <script src="meowdoku.js"></script>
     <script>

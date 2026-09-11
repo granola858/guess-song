@@ -692,18 +692,42 @@ function updateSoundButton() {
 }
 
 /* ==========================================================================
-   2. 主題（相容首頁 bobo-home-preferences-v2）
+   2. 主題（相容首頁 bobo-home-preferences-v2 與本遊戲的 meowdoku-dark-mode-v1）
    ========================================================================== */
 
-function loadDarkModePreference() {
+// 全站共用主題模組。模組沒載到（測試環境或網路失敗）時 themeKit 為 null，
+// 以下每個使用點都會退回本檔案自己的等價實作，遊戲照常能玩。
+const themeKit = (typeof BoboTheme !== 'undefined' && BoboTheme) ? BoboTheme : null;
+
+// 讀本遊戲自己的舊偏好鍵；沒存過或讀不到（隱私模式）時回 null
+function readLocalDarkMode() {
     try {
-        const prefs = JSON.parse(localStorage.getItem(HOME_PREF_KEY) || '{}');
-        if (prefs && ['dark', 'light'].includes(prefs.theme)) return prefs.theme === 'dark';
         const local = localStorage.getItem(DARK_MODE_KEY);
         if (local !== null) return local === 'true';
     } catch (error) {
-        /* 隱私模式或 JSON 損毀時往下走系統偏好 */
+        /* 隱私模式讀不到就當作沒存過 */
     }
+    return null;
+}
+
+// 優先序：首頁偏好 → 本遊戲舊鍵 → 系統 prefers-color-scheme
+function loadDarkModePreference() {
+    if (themeKit) {
+        if (themeKit.hasExplicitPreference()) return themeKit.read() === 'dark';
+        const local = readLocalDarkMode();
+        if (local !== null) return local;
+        return themeKit.systemTheme() === 'dark';
+    }
+
+    // 共用模組缺席時的退路，優先序與上面完全相同
+    try {
+        const prefs = JSON.parse(localStorage.getItem(HOME_PREF_KEY) || '{}');
+        if (prefs && ['dark', 'light'].includes(prefs.theme)) return prefs.theme === 'dark';
+    } catch (error) {
+        /* JSON 損毀或隱私模式時往下走 */
+    }
+    const local = readLocalDarkMode();
+    if (local !== null) return local;
     try {
         return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
     } catch (error) {
@@ -714,23 +738,39 @@ function loadDarkModePreference() {
 function applyDarkMode(nextMode) {
     darkMode = Boolean(nextMode);
     const theme = darkMode ? 'dark' : 'light';
-    document.documentElement.dataset.theme = theme;
+
+    if (themeKit) {
+        // 套 data-theme 並同步 meta[name="theme-color"]（色票由 meta 上的 data-theme-color-* 提供）
+        themeKit.apply(theme);
+    } else {
+        document.documentElement.dataset.theme = theme;
+        const metaThemeColor = document.getElementById('themeColor');
+        if (metaThemeColor) metaThemeColor.content = darkMode ? '#16121d' : '#fdfbff';
+    }
+
     darkModeToggle.classList.toggle('active', darkMode);
     darkModeToggle.setAttribute('aria-checked', String(darkMode));
     const toggleLabel = darkMode ? '切換為淺色模式' : '切換為深色模式';
     darkModeToggle.setAttribute('aria-label', toggleLabel);
     darkModeToggle.title = toggleLabel;
 
-    const metaThemeColor = document.getElementById('themeColor');
-    if (metaThemeColor) metaThemeColor.content = darkMode ? '#16121d' : '#fdfbff';
-
     try {
         localStorage.setItem(DARK_MODE_KEY, String(darkMode));
-        const prefs = JSON.parse(localStorage.getItem(HOME_PREF_KEY) || '{}');
-        prefs.theme = theme;
-        localStorage.setItem(HOME_PREF_KEY, JSON.stringify(prefs));
     } catch (error) {
         console.warn('Meowdoku dark mode preference could not be saved:', error);
+    }
+
+    // 首頁偏好只能改 theme 欄位，整包覆寫會清掉使用者排好的 order / hidden
+    if (themeKit) {
+        themeKit.writeHomeTheme(theme);
+    } else {
+        try {
+            const prefs = JSON.parse(localStorage.getItem(HOME_PREF_KEY) || '{}');
+            prefs.theme = theme;
+            localStorage.setItem(HOME_PREF_KEY, JSON.stringify(prefs));
+        } catch (error) {
+            console.warn('Meowdoku dark mode preference could not be saved:', error);
+        }
     }
 }
 

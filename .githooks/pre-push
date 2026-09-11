@@ -1,0 +1,42 @@
+#!/bin/sh
+# 推送前的把關。
+#
+# 啟用方式（clone 後跑一次即可，已在 SKILL.md 記錄）：
+#   git config core.hooksPath .githooks
+#
+# 真的要跳過時：git push --no-verify
+#
+# ── 為什麼這裡只跑單元測試 ──────────────────────────────────────────
+# 發布流程是 dev → main（在 GitHub 上開 PR 合併），所以 main 從來不會被
+# 本機 push —— 本機 hook 對 main 一次都不會觸發。真正能擋的位置只有「推 dev」。
+#
+# 單元測試 1 秒，適合放在每次推送；開瀏覽器的全站冒煙測試要一分鐘，
+# 每次推 dev 都等會讓人想 --no-verify，那就等於沒有把關。
+# 所以冒煙測試移到 .github/workflows/ci.yml，在 PR 進 main 時跑。
+#
+# 想在本機手動跑冒煙測試：npm run smoke
+
+has_branch=0
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [ -z "$remote_ref" ] && continue
+  case "$remote_ref" in
+    refs/tags/*) ;;
+    *) has_branch=1 ;;
+  esac
+done
+
+if [ "$has_branch" -eq 0 ]; then
+  echo "pre-push：只推 tag，略過測試。"
+  exit 0
+fi
+
+echo "pre-push：跑單元測試…"
+if ! npm test --silent; then
+  echo ""
+  echo "❌ 單元測試沒過，推送中止。"
+  echo "   真的要推：git push --no-verify"
+  exit 1
+fi
+
+echo "✅ pre-push 單元測試通過（冒煙測試會在 PR 進 main 時由 CI 跑）。"
+exit 0

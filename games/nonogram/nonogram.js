@@ -1,4 +1,6 @@
 let size = 8;
+    // 預設難度在下方常數區從 NonogramCore 取得後才指派，避免暫時性死區。
+    let difficulty;
     let currentAction = 'fill';
     let gameStates = {};
     let themeColor = '#FFB7F1';
@@ -13,8 +15,8 @@ let size = 8;
     // 存檔版本號：每次寫入都以 max(本地, 存檔) + 1 遞增，取代 Date.now() 當權威，
     // 避免背景分頁／bfcache 舊文件靠「寫得比較晚」搶走主導權。
     let saveRevision = 0;
-    // 這個文件自上次寫入後真的改動過的盤面尺寸，只有它們會被標記成新版本。
-    const dirtyStateSizes = new Set();
+    // 這個文件自上次寫入後真的改動過的盤面槽位，只有它們會被標記成新版本。
+    const dirtySlotKeys = new Set();
 
     let isBoardLocked = false;
     let wakeLockSentinel = null;
@@ -33,10 +35,41 @@ let size = 8;
       REVEALED: 'revealed',
       COMPLETED: 'completed'
     };
-    const MAX_GENERATION_ATTEMPTS = 120;
-    const linePatternCache = new Map();
+    // 純邏輯（題目生成、線解推理、難度評分）都在 nonogram-core.js，
+    // 這裡解構成區域別名，既有呼叫點就不必逐一改寫。
+    const {
+      getClues,
+      cloneGrid,
+      createEmptyPlayerState,
+      buildCluesFromSolution,
+      countSolutions,
+      areClueLinesEqual,
+      isValidMatrix,
+      isValidClueSet,
+      normalizeDifficulty,
+      DIFFICULTY_LEVELS,
+      DEFAULT_DIFFICULTY
+    } = NonogramCore;
+
+    difficulty = DEFAULT_DIFFICULTY;
+
+    const DIFFICULTY_LABELS = {
+      easy: '簡單',
+      medium: '中等',
+      hard: '困難'
+    };
+
+    // 每個「盤面尺寸 × 難度」是一個獨立槽位，各自保存一局進度。
+    const ALLOWED_SLOTS = ALLOWED_SIZES.flatMap(allowedSize =>
+      DIFFICULTY_LEVELS.map(allowedDifficulty => ({
+        size: allowedSize,
+        difficulty: allowedDifficulty,
+        key: getSlotKey(allowedSize, allowedDifficulty)
+      }))
+    );
 
     const levelBtns = document.querySelectorAll('#level-toggle .mode-btn');
+    const difficultyBtns = document.querySelectorAll('#difficulty-toggle .mode-btn');
     const actionBtns = document.querySelectorAll('#action-toggle .action-btn');
     const actionToggle = document.getElementById('action-toggle');
     const topMsg = document.getElementById('top-msg');
@@ -203,7 +236,7 @@ let size = 8;
       if (typeof seedText !== 'string') return null;
 
       const normalized = seedText.trim().toUpperCase();
-      const match = normalized.match(/^NGM-(8|10|12)-([0-9A-F]+)$/);
+      const match = normalized.match(new RegExp(`^${SHARED_SEED_PREFIX}-(${ALLOWED_SIZES.join('|')})-([0-9A-F]+)$`));
       if (!match) return null;
 
       const targetSize = parseInt(match[1], 10);
@@ -224,8 +257,9 @@ let size = 8;
         pointer += targetSize;
       }
 
+      // 這裡只負責還原盤面，唯一性與難度交給 ratePuzzle 一次判定，
+      // 才能分辨「不是唯一解」與「唯一解但必須猜測」並給出不同訊息。
       const { rowClues, colClues } = buildCluesFromSolution(solution);
-      if (countSolutions(rowClues, colClues, 2) !== 1) return null;
 
       return {
         size: targetSize,
@@ -237,7 +271,7 @@ let size = 8;
     }
 
     function updateCurrentSeedDisplay() {
-      const currentState = gameStates[size];
+      const currentState = getCurrentState();
       currentSeedOutput.value = currentState ? encodeShareSeed(currentState.solution) : '';
     }
 
@@ -249,27 +283,42 @@ let size = 8;
     function loadSeedFromInput() {
       const decodedSeed = decodeShareSeed(seedInput.value);
       if (!decodedSeed) {
-        showSeedFeedback('Seed 格式錯誤，或這個題目不是唯一解。', true);
+        showSeedFeedback('Seed 格式錯誤。', true);
         return;
       }
 
+      const rating = NonogramCore.ratePuzzle(decodedSeed.rowClues, decodedSeed.colClues);
+      if (!rating.unique) {
+        showSeedFeedback('這個題目不是唯一解，無法載入。', true);
+        return;
+      }
+      if (!rating.difficulty) {
+        showSeedFeedback('這個題目必須靠猜測才能解完，無法載入。', true);
+        return;
+      }
+
+      // Seed 只記錄盤面，難度是盤面的純函式，載入後直接切到判定出的難度槽位。
       size = decodedSeed.size;
-      updateLevelButtons();
-      gameStates[size] = {
+      difficulty = rating.difficulty;
+      const slotKey = getCurrentSlotKey();
+
+      gameStates[slotKey] = {
         solution: decodedSeed.solution,
         playerState: createEmptyPlayerState(size),
         globalRowClues: decodedSeed.rowClues,
         globalColClues: decodedSeed.colClues,
         isGameOver: false,
         resultState: RESULT_STATE.IN_PROGRESS,
-        stateRevision: getStateRevision(gameStates[size])
+        stateRevision: getStateRevision(gameStates[slotKey])
       };
-      markStateDirty(size);
+      markStateDirty(slotKey);
+      actionHistory = [];
 
+      updateSlotButtons();
       renderBoard();
       resetUI();
       seedInput.value = decodedSeed.seed;
-      showSeedFeedback('已載入指定 Seed。');
+      showSeedFeedback(`已載入指定 Seed（${size}x${size}・${DIFFICULTY_LABELS[difficulty]}）。`);
       saveData();
     }
 
@@ -297,10 +346,12 @@ let size = 8;
       }
     }
 
-    function updateLevelButtons() {
+    function updateSlotButtons() {
       levelBtns.forEach(b => {
-        b.classList.remove('active');
-        if (parseInt(b.dataset.size) === size) b.classList.add('active');
+        b.classList.toggle('active', parseInt(b.dataset.size, 10) === size);
+      });
+      difficultyBtns.forEach(b => {
+        b.classList.toggle('active', b.dataset.difficulty === difficulty);
       });
     }
 
@@ -319,9 +370,27 @@ let size = 8;
       return Number.isInteger(revision) && revision > 0 ? revision : 0;
     }
 
-    // 標記「這個文件動過某個尺寸的盤面」，寫檔時才會把它升到最新版本號。
-    function markStateDirty(targetSize) {
-      dirtyStateSizes.add(Number(targetSize));
+    // --- 槽位 (Slots) ---
+    function getSlotKey(targetSize, targetDifficulty) {
+      return `${targetSize}x${targetDifficulty}`;
+    }
+
+    // 用白名單比對而非拆字串，舊存檔的數字 key（"8"）才不會被誤判成合法槽位。
+    function parseSlotKey(key) {
+      return ALLOWED_SLOTS.find(slot => slot.key === key) || null;
+    }
+
+    function getCurrentSlotKey() {
+      return getSlotKey(size, difficulty);
+    }
+
+    function getCurrentState() {
+      return gameStates[getCurrentSlotKey()];
+    }
+
+    // 標記「這個文件動過某個槽位的盤面」，寫檔時才會把它升到最新版本號。
+    function markStateDirty(slotKey = getCurrentSlotKey()) {
+      dirtySlotKeys.add(String(slotKey));
     }
 
     function cloneSavedGameState(state) {
@@ -377,26 +446,32 @@ let size = 8;
     function createRuntimeSnapshot() {
       const snapshotStates = {};
 
-      ALLOWED_SIZES.forEach(allowedSize => {
-        const validatedState = validateSavedGameState(gameStates[allowedSize], allowedSize);
-        if (validatedState) snapshotStates[allowedSize] = validatedState;
+      ALLOWED_SLOTS.forEach(slot => {
+        const validatedState = validateSavedGameState(gameStates[slot.key], slot.size);
+        if (validatedState) snapshotStates[slot.key] = validatedState;
       });
 
-      const availableSizes = Object.keys(snapshotStates).map(Number);
-      if (!availableSizes.length) return null;
+      const availableKeys = Object.keys(snapshotStates);
+      if (!availableKeys.length) return null;
 
-      const snapshotSize = ALLOWED_SIZES.includes(size) && snapshotStates[size]
-        ? size
-        : availableSizes[0];
+      const currentKey = getCurrentSlotKey();
+      const snapshotKey = snapshotStates[currentKey] ? currentKey : availableKeys[0];
+      // 尺寸與難度一律從最終選定的槽位回推，不可拼湊出一個不存在的組合。
+      const snapshotSlot = parseSlotKey(snapshotKey);
 
       return {
-        size: snapshotSize,
+        size: snapshotSlot.size,
+        difficulty: snapshotSlot.difficulty,
         themeColor: normalizeThemeColor(themeColor),
         darkMode: Boolean(darkMode),
         isBoardLocked: Boolean(isBoardLocked),
         isWakeLockEnabled: Boolean(isWakeLockEnabled),
         gameStates: snapshotStates,
-        actionHistory: normalizeActionHistory(actionHistory, snapshotSize),
+        // actionHistory 只屬於目前操作中的槽位，退到別的槽位時必須丟棄，
+        // 否則同尺寸不同題目的 undo 會通過尺寸檢查而套到錯的盤面上。
+        actionHistory: snapshotKey === currentKey
+          ? normalizeActionHistory(actionHistory, snapshotSlot.size)
+          : [],
         revision: Math.max(0, saveRevision || 0),
         savedAt: Math.max(0, lastSavedAt || 0)
       };
@@ -415,29 +490,33 @@ let size = 8;
       const staleData = isBaseLive ? incomingData : baseData;
 
       const mergedStates = {};
-      ALLOWED_SIZES.forEach(allowedSize => {
+      ALLOWED_SLOTS.forEach(slot => {
         const resolvedState = resolveGameStateConflict(
-          baseData?.gameStates?.[allowedSize],
-          incomingData?.gameStates?.[allowedSize],
+          baseData?.gameStates?.[slot.key],
+          incomingData?.gameStates?.[slot.key],
           !isBaseLive
         );
-        if (resolvedState) mergedStates[allowedSize] = resolvedState;
+        if (resolvedState) mergedStates[slot.key] = resolvedState;
       });
 
-      const availableSizes = Object.keys(mergedStates).map(Number);
-      if (!availableSizes.length) return null;
+      const availableKeys = Object.keys(mergedStates);
+      if (!availableKeys.length) return null;
 
-      const liveSize = Number(liveData?.size);
-      const staleSize = Number(staleData?.size);
-      const mergedSize = Number.isInteger(liveSize) && mergedStates[liveSize]
-        ? liveSize
-        : (Number.isInteger(staleSize) && mergedStates[staleSize] ? staleSize : availableSizes[0]);
+      const liveKey = getSlotKey(Number(liveData?.size), normalizeDifficulty(liveData?.difficulty));
+      const staleKey = getSlotKey(Number(staleData?.size), normalizeDifficulty(staleData?.difficulty));
+      const mergedKey = mergedStates[liveKey]
+        ? liveKey
+        : (mergedStates[staleKey] ? staleKey : availableKeys[0]);
+      const mergedSlot = parseSlotKey(mergedKey);
+      const mergedSize = mergedSlot.size;
 
-      const liveHistory = normalizeActionHistory(liveData?.actionHistory, mergedSize);
-      const staleHistory = normalizeActionHistory(staleData?.actionHistory, mergedSize);
+      // 只採用「來源槽位就是最終槽位」那一側的 undo 歷史，避免套到別的題目上。
+      const liveHistory = mergedKey === liveKey ? normalizeActionHistory(liveData?.actionHistory, mergedSize) : [];
+      const staleHistory = mergedKey === staleKey ? normalizeActionHistory(staleData?.actionHistory, mergedSize) : [];
 
       return {
         size: mergedSize,
+        difficulty: mergedSlot.difficulty,
         themeColor: normalizeThemeColor(liveData?.themeColor ?? staleData?.themeColor),
         darkMode: Boolean((typeof liveData?.darkMode === 'boolean') ? liveData.darkMode : staleData?.darkMode),
         isBoardLocked: Boolean((typeof liveData?.isBoardLocked === 'boolean') ? liveData.isBoardLocked : staleData?.isBoardLocked),
@@ -463,10 +542,12 @@ let size = 8;
     function hasGameStateDifference(leftData, rightData) {
       if (!leftData || !rightData) return false;
 
-      for (const allowedSize of ALLOWED_SIZES) {
-        const leftState = leftData.gameStates?.[allowedSize];
-        const rightState = rightData.gameStates?.[allowedSize];
+      for (const slot of ALLOWED_SLOTS) {
+        const leftState = leftData.gameStates?.[slot.key];
+        const rightState = rightData.gameStates?.[slot.key];
 
+        // 一側有、另一側沒有也算有差異，儲存層缺槽位時才會被回寫補齊。
+        if (Boolean(leftState) !== Boolean(rightState)) return true;
         if (leftState && rightState && !areSavedStatesEquivalent(leftState, rightState)) {
           return true;
         }
@@ -485,8 +566,8 @@ let size = 8;
       const storedData = readSavedData();
       const revision = Math.max(saveRevision, storedData?.revision || 0) + 1;
 
-      dirtyStateSizes.forEach(dirtySize => {
-        const dirtyState = runtimeSnapshot.gameStates[dirtySize];
+      dirtySlotKeys.forEach(dirtyKey => {
+        const dirtyState = runtimeSnapshot.gameStates[dirtyKey];
         if (dirtyState) dirtyState.stateRevision = revision;
       });
 
@@ -503,21 +584,22 @@ let size = 8;
 
       saveRevision = revision;
       lastSavedAt = mergedSnapshot.savedAt;
-      dirtyStateSizes.forEach(dirtySize => {
-        if (gameStates[dirtySize]) gameStates[dirtySize].stateRevision = revision;
+      dirtySlotKeys.forEach(dirtyKey => {
+        if (gameStates[dirtyKey]) gameStates[dirtyKey].stateRevision = revision;
       });
-      dirtyStateSizes.clear();
+      dirtySlotKeys.clear();
 
       // 合併時若採用了其他分頁較新的資料，立即套回畫面，避免記憶體與存檔長期不一致。
       if (hasGameStateDifference(runtimeSnapshot, mergedSnapshot)) {
         applySavedData(mergedSnapshot, false);
         renderBoard();
-        if (!gameStates[size] || !gameStates[size].isGameOver) resetUI();
+        if (!getCurrentState() || !getCurrentState().isGameOver) resetUI();
       }
     }
 
     function applySavedData(validatedData, shouldPersist = false) {
       size = validatedData.size;
+      difficulty = validatedData.difficulty;
       themeColor = validatedData.themeColor;
       darkMode = validatedData.darkMode;
       gameStates = validatedData.gameStates;
@@ -526,7 +608,7 @@ let size = 8;
       lastSavedAt = Math.max(lastSavedAt, validatedData.savedAt || 0);
 
       applyDarkMode(darkMode);
-      updateLevelButtons();
+      updateSlotButtons();
 
       if (typeof validatedData.isBoardLocked === 'boolean') {
         setBoardLockState(validatedData.isBoardLocked);
@@ -582,7 +664,7 @@ let size = 8;
       applySavedData(resolvedData, shouldPersistResolved);
       renderBoard();
 
-      if (!gameStates[size] || !gameStates[size].isGameOver) {
+      if (!getCurrentState() || !getCurrentState().isGameOver) {
         resetUI();
       }
 
@@ -601,12 +683,17 @@ let size = 8;
     }
 
     // --- 綁定事件 (Event Listeners) ---
+    // 按鈕的 active 狀態交給 switchSlot 內的 updateSlotButtons 回寫，
+    // 生題失敗需要回滾時畫面才不會停在按不到的槽位上。
     levelBtns.forEach(btn => {
       btn.addEventListener('click', (e) => {
-        levelBtns.forEach(b => b.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        let newSize = parseInt(e.currentTarget.dataset.size);
-        loadLevel(newSize);
+        switchSlot(parseInt(e.currentTarget.dataset.size, 10), difficulty);
+      });
+    });
+
+    difficultyBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        switchSlot(size, e.currentTarget.dataset.difficulty);
       });
     });
 
@@ -653,7 +740,7 @@ let size = 8;
     });
 
     checkBtn.addEventListener('click', checkAnswer);
-    newGameBtn.addEventListener('click', () => { confirmStartNewGame(size); });
+    newGameBtn.addEventListener('click', () => { confirmStartNewGame(size, difficulty); });
     undoBtn.addEventListener('click', undoLastAction);
     clearBoardBtn.addEventListener('click', clearBoard);
 
@@ -763,267 +850,6 @@ let size = 8;
       if (shouldSave) saveData();
     }
 
-    // --- 核心邏輯 (Core Logic) ---
-    function getClues(arr) {
-      let clues = [], count = 0;
-      for (let i = 0; i < arr.length; i++) {
-        if (arr[i] === 1) count++;
-        else if (count > 0) { clues.push(count); count = 0; }
-      }
-      if (count > 0) clues.push(count);
-      return clues.length > 0 ? clues : [0];
-    }
-
-    function cloneGrid(grid) {
-      return grid.map(row => row.slice());
-    }
-
-    function createEmptyPlayerState(targetSize) {
-      return Array.from({ length: targetSize }, () => new Array(targetSize).fill(0));
-    }
-
-    function buildCluesFromSolution(solution) {
-      const targetSize = solution.length;
-      const rowClues = solution.map(getClues);
-      const colClues = [];
-
-      for (let c = 0; c < targetSize; c++) {
-        const col = [];
-        for (let r = 0; r < targetSize; r++) col.push(solution[r][c]);
-        colClues.push(getClues(col));
-      }
-
-      return { rowClues, colClues };
-    }
-
-    function createRandomSolution(targetSize) {
-      const solution = [];
-
-      for (let r = 0; r < targetSize; r++) {
-        const row = [];
-        for (let c = 0; c < targetSize; c++) {
-          row.push(Math.random() > 0.45 ? 1 : 0);
-        }
-        solution.push(row);
-      }
-
-      return solution;
-    }
-
-    function generateLinePatterns(length, clues) {
-      if (clues.length === 1 && clues[0] === 0) {
-        return [new Array(length).fill(0)];
-      }
-
-      const patterns = [];
-
-      function backtrack(clueIndex, position, line) {
-        if (clueIndex === clues.length) {
-          patterns.push(line.concat(new Array(length - line.length).fill(0)));
-          return;
-        }
-
-        const blockLength = clues[clueIndex];
-        const remainingBlocks = clues.slice(clueIndex + 1);
-        const remainingMin = remainingBlocks.reduce((sum, value) => sum + value, 0) + remainingBlocks.length;
-        const maxStart = length - blockLength - remainingMin;
-
-        for (let start = position; start <= maxStart; start++) {
-          const nextLine = line.slice();
-          while (nextLine.length < start) nextLine.push(0);
-          for (let i = 0; i < blockLength; i++) nextLine.push(1);
-          if (clueIndex < clues.length - 1) nextLine.push(0);
-          backtrack(clueIndex + 1, nextLine.length, nextLine);
-        }
-      }
-
-      backtrack(0, 0, []);
-      return patterns;
-    }
-
-    function getLinePatterns(length, clues) {
-      const cacheKey = `${length}:${clues.join('-')}`;
-      if (!linePatternCache.has(cacheKey)) {
-        linePatternCache.set(cacheKey, generateLinePatterns(length, clues));
-      }
-      return linePatternCache.get(cacheKey);
-    }
-
-    function getForcedLineValue(patterns, index) {
-      const firstValue = patterns[0][index];
-      for (let i = 1; i < patterns.length; i++) {
-        if (patterns[i][index] !== firstValue) return -1;
-      }
-      return firstValue;
-    }
-
-    function cloneDomains(domains) {
-      return domains.map(domain => domain.slice());
-    }
-
-    function propagateConstraints(board, rowDomains, colDomains) {
-      const targetSize = board.length;
-      let changed = true;
-
-      while (changed) {
-        changed = false;
-
-        for (let r = 0; r < targetSize; r++) {
-          const filteredRowPatterns = rowDomains[r].filter(pattern => {
-            for (let c = 0; c < targetSize; c++) {
-              if (board[r][c] !== -1 && board[r][c] !== pattern[c]) return false;
-            }
-            return true;
-          });
-
-          if (!filteredRowPatterns.length) return false;
-          if (filteredRowPatterns.length !== rowDomains[r].length) {
-            rowDomains[r] = filteredRowPatterns;
-            changed = true;
-          }
-
-          for (let c = 0; c < targetSize; c++) {
-            const forcedValue = getForcedLineValue(rowDomains[r], c);
-            if (forcedValue === -1) continue;
-            if (board[r][c] === -1) {
-              board[r][c] = forcedValue;
-              changed = true;
-            } else if (board[r][c] !== forcedValue) {
-              return false;
-            }
-          }
-        }
-
-        for (let c = 0; c < targetSize; c++) {
-          const filteredColPatterns = colDomains[c].filter(pattern => {
-            for (let r = 0; r < targetSize; r++) {
-              if (board[r][c] !== -1 && board[r][c] !== pattern[r]) return false;
-            }
-            return true;
-          });
-
-          if (!filteredColPatterns.length) return false;
-          if (filteredColPatterns.length !== colDomains[c].length) {
-            colDomains[c] = filteredColPatterns;
-            changed = true;
-          }
-
-          for (let r = 0; r < targetSize; r++) {
-            const forcedValue = getForcedLineValue(colDomains[c], r);
-            if (forcedValue === -1) continue;
-            if (board[r][c] === -1) {
-              board[r][c] = forcedValue;
-              changed = true;
-            } else if (board[r][c] !== forcedValue) {
-              return false;
-            }
-          }
-        }
-      }
-
-      return true;
-    }
-
-    function isBoardSolved(board) {
-      return board.every(row => row.every(cell => cell !== -1));
-    }
-
-    function searchSolutions(board, rowDomains, colDomains, limit, counter) {
-      if (counter.count >= limit) return;
-      if (!propagateConstraints(board, rowDomains, colDomains)) return;
-
-      if (isBoardSolved(board)) {
-        counter.count++;
-        return;
-      }
-
-      let branch = null;
-
-      for (let r = 0; r < rowDomains.length; r++) {
-        if (rowDomains[r].length > 1 && (!branch || rowDomains[r].length < branch.domainSize)) {
-          branch = { type: 'row', index: r, domainSize: rowDomains[r].length };
-        }
-      }
-
-      for (let c = 0; c < colDomains.length; c++) {
-        if (colDomains[c].length > 1 && (!branch || colDomains[c].length < branch.domainSize)) {
-          branch = { type: 'col', index: c, domainSize: colDomains[c].length };
-        }
-      }
-
-      if (!branch) return;
-
-      const patterns = branch.type === 'row' ? rowDomains[branch.index] : colDomains[branch.index];
-
-      for (const pattern of patterns) {
-        if (counter.count >= limit) return;
-
-        const nextBoard = cloneGrid(board);
-        const nextRowDomains = cloneDomains(rowDomains);
-        const nextColDomains = cloneDomains(colDomains);
-
-        if (branch.type === 'row') {
-          nextRowDomains[branch.index] = [pattern];
-          for (let c = 0; c < pattern.length; c++) {
-            if (nextBoard[branch.index][c] !== -1 && nextBoard[branch.index][c] !== pattern[c]) {
-              return;
-            }
-            nextBoard[branch.index][c] = pattern[c];
-          }
-        } else {
-          nextColDomains[branch.index] = [pattern];
-          for (let r = 0; r < pattern.length; r++) {
-            if (nextBoard[r][branch.index] !== -1 && nextBoard[r][branch.index] !== pattern[r]) {
-              return;
-            }
-            nextBoard[r][branch.index] = pattern[r];
-          }
-        }
-
-        searchSolutions(nextBoard, nextRowDomains, nextColDomains, limit, counter);
-      }
-    }
-
-    function countSolutions(rowClues, colClues, limit = 2) {
-      const targetSize = rowClues.length;
-      const board = Array.from({ length: targetSize }, () => new Array(targetSize).fill(-1));
-      const rowDomains = rowClues.map(clues => getLinePatterns(targetSize, clues));
-      const colDomains = colClues.map(clues => getLinePatterns(targetSize, clues));
-      const counter = { count: 0 };
-
-      searchSolutions(board, rowDomains, colDomains, limit, counter);
-      return counter.count;
-    }
-
-    function generateUniquePuzzle(targetSize) {
-      for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
-        const solution = createRandomSolution(targetSize);
-        const { rowClues, colClues } = buildCluesFromSolution(solution);
-
-        if (countSolutions(rowClues, colClues, 2) === 1) {
-          return { solution, rowClues, colClues };
-        }
-      }
-
-      throw new Error(`Unable to generate a unique ${targetSize}x${targetSize} puzzle.`);
-    }
-
-    function areClueLinesEqual(left, right) {
-      return left.length === right.length && left.every((value, index) => value === right[index]);
-    }
-
-    function isValidMatrix(matrix, targetSize, isValidCell) {
-      return Array.isArray(matrix) &&
-        matrix.length === targetSize &&
-        matrix.every(row => Array.isArray(row) && row.length === targetSize && row.every(isValidCell));
-    }
-
-    function isValidClueSet(clues, targetSize) {
-      return Array.isArray(clues) &&
-        clues.length === targetSize &&
-        clues.every(line => Array.isArray(line) && line.length > 0 && line.every(value => Number.isInteger(value) && value >= 0));
-    }
-
     function validateSavedGameState(savedState, targetSize) {
       if (!savedState || typeof savedState !== 'object') return null;
       if (!isValidMatrix(savedState.solution, targetSize, value => value === 0 || value === 1)) return null;
@@ -1060,24 +886,39 @@ let size = 8;
 
       const validatedStates = {};
 
-      ALLOWED_SIZES.forEach(allowedSize => {
-        const validatedState = validateSavedGameState(parsed.gameStates[allowedSize], allowedSize);
-        if (validatedState) validatedStates[allowedSize] = validatedState;
+      ALLOWED_SLOTS.forEach(slot => {
+        const validatedState = validateSavedGameState(parsed.gameStates[slot.key], slot.size);
+        if (validatedState) validatedStates[slot.key] = validatedState;
       });
 
-      const availableSizes = Object.keys(validatedStates).map(Number);
-      if (!availableSizes.length) return null;
+      // 舊存檔以「盤面尺寸」當 key，沒有難度概念；把它們視為中等難度搬進對應槽位。
+      // 這裡不動任何版本號，首次載入後的正常回寫就會把格式落地。
+      ALLOWED_SIZES.forEach(allowedSize => {
+        const legacyState = validateSavedGameState(parsed.gameStates[allowedSize], allowedSize);
+        if (!legacyState) return;
 
-      const validatedSize = ALLOWED_SIZES.includes(parsed.size) && validatedStates[parsed.size]
-        ? parsed.size
-        : availableSizes[0];
+        const targetKey = getSlotKey(allowedSize, DEFAULT_DIFFICULTY);
+        validatedStates[targetKey] = validatedStates[targetKey]
+          ? resolveGameStateConflict(validatedStates[targetKey], legacyState, false)
+          : legacyState;
+      });
 
-      const validHistory = Array.isArray(parsed.actionHistory)
+      const availableKeys = Object.keys(validatedStates);
+      if (!availableKeys.length) return null;
+
+      const candidateKey = getSlotKey(parsed.size, normalizeDifficulty(parsed.difficulty));
+      const validatedKey = validatedStates[candidateKey] ? candidateKey : availableKeys[0];
+      const validatedSlot = parseSlotKey(validatedKey);
+      const validatedSize = validatedSlot.size;
+
+      // 退到別的槽位時 undo 歷史必定不屬於那一局，直接丟棄。
+      const validHistory = validatedKey === candidateKey && Array.isArray(parsed.actionHistory)
         ? parsed.actionHistory.filter(snapshot => isValidMatrix(snapshot, validatedSize, value => value === 0 || value === 1 || value === 2))
         : [];
 
       return {
         size: validatedSize,
+        difficulty: validatedSlot.difficulty,
         themeColor: normalizeThemeColor(parsed.themeColor),
         darkMode: Boolean(parsed.darkMode),
         isBoardLocked: Boolean(parsed.isBoardLocked),
@@ -1089,38 +930,48 @@ let size = 8;
       };
     }
 
-    function initGameData(targetSize) {
-      const { solution, rowClues, colClues } = generateUniquePuzzle(targetSize);
+    function initGameData(targetSize, targetDifficulty) {
+      const { solution, rowClues, colClues } = NonogramCore.generatePuzzle(targetSize, targetDifficulty);
+      const slotKey = getSlotKey(targetSize, targetDifficulty);
 
-      gameStates[targetSize] = {
+      gameStates[slotKey] = {
         solution: solution,
         playerState: createEmptyPlayerState(targetSize),
         globalRowClues: rowClues,
         globalColClues: colClues,
         isGameOver: false
         , resultState: RESULT_STATE.IN_PROGRESS
-        , stateRevision: getStateRevision(gameStates[targetSize])
+        , stateRevision: getStateRevision(gameStates[slotKey])
       };
-      markStateDirty(targetSize);
-      saveData();
+      markStateDirty(slotKey);
     }
 
-    function loadLevel(newSize) {
+    // 切換盤面尺寸或難度都走這裡：每個槽位各自保存一局，切過去若還沒有題目就現生一題。
+    function switchSlot(nextSize, nextDifficulty) {
       const previousSize = size;
-      size = newSize;
+      const previousDifficulty = difficulty;
+      const previousKey = getCurrentSlotKey();
 
-      if (!gameStates[size]) {
+      size = nextSize;
+      difficulty = normalizeDifficulty(nextDifficulty);
+
+      if (!getCurrentState()) {
         try {
-          initGameData(size);
+          initGameData(size, difficulty);
         } catch (error) {
           console.error(error);
           size = previousSize;
-          updateLevelButtons();
+          difficulty = previousDifficulty;
+          updateSlotButtons();
           showGenerationFailure();
           return;
         }
       }
 
+      // undo 歷史只屬於原本那一局，換槽位後必須清空，否則會套到別的題目上。
+      if (getCurrentSlotKey() !== previousKey) actionHistory = [];
+
+      updateSlotButtons();
       renderBoard();
       resetUI();
       saveData();
@@ -1137,7 +988,7 @@ let size = 8;
           <path d="M21 12a9 9 0 1 1-3-6.7"></path>
           <path d="M21 3v6h-6"></path>
         </svg>`;
-      ngBtn.onclick = () => confirmStartNewGame(size);
+      ngBtn.onclick = () => confirmStartNewGame(size, difficulty);
       return ngBtn;
     }
 
@@ -1175,7 +1026,7 @@ let size = 8;
     }
 
     function updateClearBoardButtonState() {
-      const state = gameStates[size];
+      const state = getCurrentState();
       const isEmpty = state ? isBoardEmpty(state.playerState) : true;
       const shouldDisable = !state || state.isGameOver || isEmpty;
       clearBoardBtn.disabled = shouldDisable;
@@ -1183,7 +1034,7 @@ let size = 8;
     }
 
     function updateUndoButtonState() {
-      const shouldDisable = !actionHistory.length || !gameStates[size] || gameStates[size].isGameOver;
+      const shouldDisable = !actionHistory.length || !getCurrentState() || getCurrentState().isGameOver;
       undoBtn.disabled = shouldDisable;
       undoBtn.setAttribute('aria-disabled', String(shouldDisable));
     }
@@ -1233,7 +1084,7 @@ let size = 8;
     let cellEls = [];
 
     function renderBoard() {
-      let state = gameStates[size];
+      let state = getCurrentState();
       boardEl.style.gridTemplateColumns = `max-content repeat(${size}, minmax(0, 1fr))`;
       boardEl.innerHTML = '';
       cellEls = Array.from({ length: size }, () => new Array(size));
@@ -1283,10 +1134,10 @@ let size = 8;
       updateUndoButtonState();
     }
 
-    function startNewGame(targetSize) {
+    function startNewGame(targetSize = size, targetDifficulty = difficulty) {
       actionHistory = [];
       try {
-        initGameData(targetSize);
+        initGameData(targetSize, targetDifficulty);
       } catch (error) {
         console.error(error);
         showGenerationFailure();
@@ -1298,16 +1149,16 @@ let size = 8;
       saveData();
     }
 
-    async function confirmStartNewGame(targetSize) {
-      const state = gameStates[targetSize];
+    async function confirmStartNewGame(targetSize = size, targetDifficulty = difficulty) {
+      const state = gameStates[getSlotKey(targetSize, targetDifficulty)];
       if (state && state.isGameOver) {
-        startNewGame(targetSize);
+        startNewGame(targetSize, targetDifficulty);
         return;
       }
 
       const confirmed = await showConfirmDialog('新的一局', '確定要開始新的一局嗎？目前進度會遺失。', '開始新局');
       if (confirmed) {
-        startNewGame(targetSize);
+        startNewGame(targetSize, targetDifficulty);
       }
     }
 
@@ -1333,14 +1184,14 @@ let size = 8;
     }
 
     function undoLastAction() {
-      const state = gameStates[size];
+      const state = getCurrentState();
       if (!state || state.isGameOver || !actionHistory.length) return;
 
       const previous = state.playerState;
       const restored = actionHistory.pop();
       state.playerState = restored;
       state.resultState = RESULT_STATE.IN_PROGRESS;
-      markStateDirty(size);
+      markStateDirty();
 
       // 只更新真正改變的格子，不重建整個盤面。
       // 盤面結構若還沒建立（例如剛切換尺寸）才退回完整重繪
@@ -1365,7 +1216,7 @@ let size = 8;
     }
 
     async function clearBoard() {
-      const state = gameStates[size];
+      const state = getCurrentState();
       if (!state || state.isGameOver) return;
 
       const confirmed = await showConfirmDialog('清空盤面', '確定要清空整個盤面嗎？這會移除目前所有塗黑與標記。', '確認清空');
@@ -1374,14 +1225,14 @@ let size = 8;
       actionHistory.push(cloneGrid(state.playerState));
       state.playerState = createEmptyPlayerState(size);
       state.resultState = RESULT_STATE.IN_PROGRESS;
-      markStateDirty(size);
+      markStateDirty();
       renderBoard();
       resetUI();
       saveData();
     }
 
     function handlePointerDown(e) {
-      if (isBoardLocked || gameStates[size].isGameOver) return;
+      if (isBoardLocked || getCurrentState().isGameOver) return;
       if (e.type === 'touchstart') e.preventDefault();
 
       const cell = e.target.closest('.cell');
@@ -1389,11 +1240,11 @@ let size = 8;
 
       isDragging = true;
       lastHoveredCell = cell;
-      dragSnapshot = cloneGrid(gameStates[size].playerState);
+      dragSnapshot = cloneGrid(getCurrentState().playerState);
       dragHistoryCommitted = false;
       const r = cell.dataset.r;
       const c = cell.dataset.c;
-      const currentState = gameStates[size].playerState[r][c];
+      const currentState = getCurrentState().playerState[r][c];
 
       if (currentAction === 'fill') {
         dragAction = (currentState === 1) ? 'unfill' : 'fill';
@@ -1409,7 +1260,7 @@ let size = 8;
     let lastHoveredCell = null;
 
     function handlePointerEnter(e) {
-      if (isBoardLocked || !isDragging || gameStates[size].isGameOver) return;
+      if (isBoardLocked || !isDragging || getCurrentState().isGameOver) return;
       const cell = e.target.closest('.cell');
       if (!cell || cell === lastHoveredCell) return;
       lastHoveredCell = cell;
@@ -1417,7 +1268,7 @@ let size = 8;
     }
 
     function handleTouchMove(e) {
-      if (isBoardLocked || !isDragging || gameStates[size].isGameOver) return;
+      if (isBoardLocked || !isDragging || getCurrentState().isGameOver) return;
       e.preventDefault();
 
       const touch = e.touches[0];
@@ -1440,7 +1291,7 @@ let size = 8;
     }
 
     function applyAction(cell, r, c) {
-      let state = gameStates[size];
+      let state = getCurrentState();
       const currentValue = state.playerState[r][c];
       cell.classList.remove('error-wrong', 'error-miss');
 
@@ -1469,7 +1320,7 @@ let size = 8;
         dragHistoryCommitted = true;
       }
       state.playerState[r][c] = nextValue;
-      markStateDirty(size);
+      markStateDirty();
 
       updateCompletedClueStatus(state);
       updateClearBoardButtonState();
@@ -1477,7 +1328,7 @@ let size = 8;
     }
 
     function checkAnswer() {
-      let state = gameStates[size];
+      let state = getCurrentState();
       if (state.isGameOver) return;
       showResult(isPlayerSolutionCorrect(state));
     }
@@ -1495,17 +1346,19 @@ let size = 8;
       dragSnapshot = null;
       dragHistoryCommitted = false;
 
+      const state = getCurrentState();
+
       if (isWin) {
-        gameStates[size].playerState = cloneGrid(gameStates[size].solution);
-        gameStates[size].isGameOver = true;
-        gameStates[size].resultState = RESULT_STATE.WIN;
+        state.playerState = cloneGrid(state.solution);
+        state.isGameOver = true;
+        state.resultState = RESULT_STATE.WIN;
         actionHistory = [];
-        markStateDirty(size);
+        markStateDirty();
         renderBoard();
 
         saveData();
       } else {
-        gameStates[size].resultState = RESULT_STATE.IN_PROGRESS;
+        state.resultState = RESULT_STATE.IN_PROGRESS;
         topMsg.style.color = 'var(--text-secondary)';
         topMsg.innerText = '你再想想看';
 
@@ -1527,18 +1380,18 @@ let size = 8;
     }
 
     function showSolution() {
-      let state = gameStates[size];
+      let state = getCurrentState();
       state.playerState = cloneGrid(state.solution);
       state.isGameOver = true;
       state.resultState = RESULT_STATE.REVEALED;
-      markStateDirty(size);
+      markStateDirty();
       renderBoard();
 
       saveData();
     }
 
     function resetUI() {
-      if (gameStates[size] && gameStates[size].isGameOver) return; // 避免結束後還原按鈕
+      if (getCurrentState() && getCurrentState().isGameOver) return; // 避免結束後還原按鈕
 
       actionToggle.classList.remove('hidden');
       topMsg.classList.add('hidden');
@@ -1554,7 +1407,7 @@ let size = 8;
     applyDarkMode(darkMode);
 
     if (!loadData()) {
-      loadLevel(size); // 如果沒有 cookie/localStorage 記錄，載入預設 8x8
+      switchSlot(size, difficulty); // 如果沒有 cookie/localStorage 記錄，載入預設 8x8 中等
     } else {
       renderBoard(); // 如果有記錄，直接繪製盤面
     }

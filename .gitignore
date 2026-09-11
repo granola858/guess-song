@@ -26,3 +26,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# run-mini-games skill 的截圖產物
+.claude/skills/run-mini-games/_shots/

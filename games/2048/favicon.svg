@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="波波 2048">
+  <defs>
+    <!-- 暖棕底：與遊戲主色 #7f5539 同系 -->
+    <linearGradient id="woodBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9c6644"/>
+      <stop offset="1" stop-color="#7f5539"/>
+    </linearGradient>
+    <!-- 磚塊由淺到深的進階感 -->
+    <linearGradient id="tileA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3e0cd"/>
+      <stop offset="1" stop-color="#ddb892"/>
+    </linearGradient>
+    <linearGradient id="tileB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6d38a"/>
+      <stop offset="1" stop-color="#e9c46a"/>
+    </linearGradient>
+    <linearGradient id="tileC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7b283"/>
+      <stop offset="1" stop-color="#ef8354"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 盤面底：暖棕圓角矩形 -->
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="url(#woodBg)"/>
+  <rect x="0.7" y="0.7" width="30.6" height="30.6" rx="6.4" fill="none" stroke="#5c3d22" stroke-opacity="0.55" stroke-width="1.2"/>
+
+  <!-- 三顆代表「2 → 4 → 8」的磚塊 -->
+  <g>
+    <rect x="4.5" y="4.4" width="6.2" height="6.2" rx="1.7" fill="url(#tileA)"/>
+    <rect x="12.9" y="4.4" width="6.2" height="6.2" rx="1.7" fill="url(#tileB)"/>
+    <rect x="21.3" y="4.4" width="6.2" height="6.2" rx="1.7" fill="url(#tileC)"/>
+  </g>
+
+  <!-- 明顯的大數字「2」：2048 的起點磚 -->
+  <path d="M10.8 18.6a4.4 4.4 0 1 1 8.4 2.1L10.6 27.4h10"
+        fill="none" stroke="#3c2415" stroke-opacity="0.35"
+        stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"
+        transform="translate(0.5 0.6)"/>
+  <path d="M10.8 18.6a4.4 4.4 0 1 1 8.4 2.1L10.6 27.4h10"
+        fill="none" stroke="#fff5e9"
+        stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

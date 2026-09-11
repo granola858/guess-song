@@ -400,7 +400,32 @@
       text-shadow: 0 1px 0 var(--heading-shadow);
     }
 
-    /* 難度切換 (Level Toggle) */
+    /* 盤面與難度切換 (Slot Controls) */
+    .control-stack {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .control-group {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .control-label {
+      width: 100%;
+      max-width: 320px;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding-left: 8px;
+    }
+
     .toggle-container {
       display: flex;
       width: 100%;
@@ -835,6 +860,24 @@
         font-size: 28px;
       }
 
+      .control-stack {
+        gap: 8px;
+      }
+
+      .control-group {
+        gap: 4px;
+      }
+
+      .control-label {
+        padding-left: 6px;
+        font-size: 0.74rem;
+      }
+
+      .mode-btn {
+        font-size: 0.92rem;
+        padding: 7px 0;
+      }
+
       .clue-cell {
         min-width: 36px;
         padding: 3px 2px;
@@ -879,7 +922,20 @@
         gap: 8px;
       }
 
-      .toggle-container {
+      .control-stack {
+        gap: 6px;
         margin-bottom: 4px;
+      }
+
+      .control-group {
+        gap: 3px;
+      }
+
+      .control-label {
+        font-size: 0.7rem;
+      }
+
+      .mode-btn {
+        padding: 6px 0;
       }
     }

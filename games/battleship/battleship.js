@@ -15,223 +15,88 @@ const BOARD_SIZE = 10;
 const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
 const STORAGE_KEY = 'bobo-battleship-saved-game-v1';
 
-// 音效合成器 (Web Audio API) - 具備行動裝置背景切換與通話中斷喚醒機制
+// 音效合成器 - 薄薄一層包在全站共用模組 BoboAudio 上。
+// 瀏覽器樣板（AudioContext 延後到使用者手勢才建立、iOS 靜音 buffer 解鎖、
+// 背景 suspend／前景與 'interrupted' 喚醒、每個節點都 stop + disconnect、
+// 偏好持久化）全部由模組接管，這裡只留下海戰棋自己的音色。
+//
+// 注意：'battleship-muted' 這個舊 key 存的是「靜音」，與模組的 enabled 相反，
+// 所以要 invert: true —— 老玩家的靜音偏好才不會被反過來。
+//
+// BoboAudio 缺席時整個類別安靜退場：遊戲照常能玩，只是沒有聲音。
 class SoundFX {
   constructor() {
-    this.ctx = null;
-    this.muted = false;
-    try {
-      this.muted = localStorage.getItem('battleship-muted') === 'true';
-    } catch (_) {}
-    this.bindLifecycle();
+    this.kit = (typeof BoboAudio !== 'undefined' && BoboAudio)
+      ? BoboAudio.create({ storageKey: 'battleship-muted', invert: true })
+      : null;
   }
 
-  bindLifecycle() {
-    const unlock = () => {
-      this.ensureRunning();
-    };
-
-    // 當切換分頁或手機螢幕休眠時暫停音訊，返回時自動喚醒
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        this.ensureRunning();
-      } else if (document.visibilityState === 'hidden') {
-        if (this.ctx && this.ctx.state === 'running') {
-          this.ctx.suspend().catch(() => {});
-        }
-      }
-    });
-
-    window.addEventListener('pageshow', unlock);
-    window.addEventListener('focus', unlock);
-    document.addEventListener('touchstart', unlock, { passive: true });
-    document.addEventListener('pointerdown', unlock, { passive: true });
+  /** 是否靜音（UI 沿用舊介面讀 muted，與模組的 enabled 相反） */
+  get muted() {
+    return this.kit ? !this.kit.enabled : false;
   }
 
-  ensureRunning() {
-    if (!this.ctx) return;
-    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
-      this.ctx.resume().catch(() => {});
-    } else if (this.ctx.state === 'closed') {
-      this.ctx = null;
-      this.init();
-    }
-  }
-
-  init() {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        this.ctx = new AudioCtx();
-      }
-    }
-    this.ensureRunning();
-  }
-
+  /** 切換靜音並持久化 @returns {boolean} 切換後是否靜音 */
   toggleMute() {
-    this.muted = !this.muted;
-    try {
-      localStorage.setItem('battleship-muted', this.muted);
-    } catch (_) {}
-    return this.muted;
+    if (!this.kit) return false;
+    return !this.kit.toggle();
   }
 
+  /** 聲納掃描：880 → 440 Hz 下滑 */
   playSonar() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, now);
-      osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
-      gain.gain.setValueAtTime(0.15, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.3);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({ from: 880, to: 440, type: 'sine', duration: 0.3, gain: 0.15, floor: 0.001 });
   }
 
+  /** 發射砲彈：300 → 900 Hz 上滑（音量走線性衰減） */
   playLaunch() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(300, now);
-      osc.frequency.exponentialRampToValueAtTime(900, now + 0.18);
-      gain.gain.setValueAtTime(0.12, now);
-      gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.2);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({
+      from: 300, to: 900, glide: 0.18, type: 'triangle',
+      duration: 0.2, gain: 0.12, curve: 'linear', floor: 0.01
+    });
   }
 
+  /** 命中爆炸：低通濾波白噪，截止頻率 900 → 50 Hz */
   playHit() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const bufferSize = this.ctx.sampleRate * 0.35;
-      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = buffer;
-
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(900, now);
-      filter.frequency.exponentialRampToValueAtTime(50, now + 0.35);
-
-      const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.4, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.ctx.destination);
-      noise.start(now);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.noise({
+      duration: 0.35, gain: 0.4, floor: 0.01,
+      filter: { type: 'lowpass', frequency: 900, to: 50 }
+    });
   }
 
+  /** 落空水花：160 → 90 Hz 悶響 */
   playMiss() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(160, now);
-      osc.frequency.exponentialRampToValueAtTime(90, now + 0.22);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.22);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({ from: 160, to: 90, type: 'sine', duration: 0.22, gain: 0.2, floor: 0.01 });
   }
 
+  /** 擊沉：兩聲間隔 0.22 秒的 520 → 280 Hz 線性下滑警報 */
   playSunk() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      for (let i = 0; i < 2; i++) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sawtooth';
-        const start = now + i * 0.22;
-        osc.frequency.setValueAtTime(520, start);
-        osc.frequency.linearRampToValueAtTime(280, start + 0.18);
-        gain.gain.setValueAtTime(0.16, start);
-        gain.gain.exponentialRampToValueAtTime(0.01, start + 0.18);
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(start);
-        osc.stop(start + 0.18);
-      }
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.chord(
+      [{ from: 520, to: 280, delay: 0 }, { from: 520, to: 280, delay: 0.22 }],
+      { type: 'sawtooth', duration: 0.18, gain: 0.16, freqCurve: 'linear', floor: 0.01 }
+    );
   }
 
+  /** 勝利：C 大三和弦琶音上行 */
   playVictory() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const notes = [523.25, 659.25, 783.99, 1046.50];
-      notes.forEach((freq, idx) => {
-        const now = this.ctx.currentTime + idx * 0.12;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now);
-        gain.gain.setValueAtTime(0.2, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.35);
-      });
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.chord(
+      [523.25, 659.25, 783.99, 1046.50],
+      { type: 'triangle', duration: 0.35, gain: 0.2, stagger: 0.12, floor: 0.001 }
+    );
   }
 
+  /** 落敗：四音下行 */
   playDefeat() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const notes = [440, 392, 349.23, 293.66];
-      notes.forEach((freq, idx) => {
-        const now = this.ctx.currentTime + idx * 0.16;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now);
-        gain.gain.setValueAtTime(0.25, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.38);
-      });
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.chord(
+      [440, 392, 349.23, 293.66],
+      { type: 'sine', duration: 0.38, gain: 0.25, stagger: 0.16, floor: 0.001 }
+    );
   }
 }
 

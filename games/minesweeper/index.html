@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>波波掃雷：純粹經典 - 波波小遊戲</title>
+  <title>掃雷：純粹經典 - 波波小遊戲</title>
   <meta name="description" content="Windows 95 復古配色的純粹經典踩地雷，左右切換分頁還有戰術道具與地宮 Roguelite 兩種進階模式，支援極致觸控操作。">
 
   <!-- 字型引入 -->
@@ -12,13 +12,23 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
 
-  <!-- 防止深色模式閃爍與皮膚預載 -->
+  <!-- 防止深色模式閃爍：BoboTheme.ANTI_FLASH_SNIPPET 的逐字複製，請勿自行改寫 -->
   <script>
     (() => {
       try {
         const homePref = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-        const theme = ['dark', 'light'].includes(homePref.theme) ? homePref.theme : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        const theme = ['dark', 'light'].includes(homePref.theme)
+          ? homePref.theme
+          : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         document.documentElement.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+
+  <!-- 皮膚預載：掃雷專屬，與共用主題樣板分開維護 -->
+  <script>
+    (() => {
+      try {
         // 預設進經典模式；有未完成戰局時才依存檔模式套用對應皮膚，避免風格閃爍
         const saved = JSON.parse(localStorage.getItem('minesweeper_save_state_v1') || '{}');
         const savedMode = saved && saved.grid ? saved.mode : 'classic';
@@ -76,7 +86,7 @@
     <!-- 2. 主標題 -->
     <section class="game-header">
       <h1 class="main-title">
-        <span class="main-title-text" id="title-text">波波掃雷：純粹經典</span>
+        <span class="main-title-text" id="title-text">掃雷：純粹經典</span>
         <span class="main-title-badge" id="title-badge">Minesweeper</span>
       </h1>
     </section>
@@ -347,6 +357,11 @@
       </div>
     </div>
   </div>
+
+  <!-- 共用模組（順序固定，且一律不加 defer / async） -->
+  <script src="../../assets/js/bobo-confetti.js"></script>
+  <script src="../../assets/js/bobo-theme.js"></script>
+  <script src="../../assets/js/bobo-audio.js"></script>
 
   <!-- 統計與遊戲模組 -->
   <script src="../../assets/js/stats.js"></script>

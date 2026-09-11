@@ -1,5 +1,5 @@
 /* ==========================================================================
-   波波特工與地宮掃雷 (Minesweeper: Tactical & Dungeon)
+   特工與地宮掃雷 (Minesweeper: Tactical & Dungeon)
    Core Engine, Audio Synthesizer, Touch UX & Persistence
    ========================================================================== */
 
@@ -32,9 +32,9 @@ const MODE_SKIN_MAP = {
 };
 
 const SKIN_TITLES = {
-  [SKINS.TACTICAL]: { text: '波波特工：戰術排雷', badge: 'Tactical Ops', label: '<span>🤖 戰術特工</span>' },
-  [SKINS.DUNGEON]: { text: '波波地宮：掃雷冒險', badge: 'Dungeon Sweeper', label: '<span>🗺️ 地宮探險</span>' },
-  [SKINS.CLASSIC]: { text: '波波掃雷：純粹經典', badge: 'Minesweeper', label: '<span>🖥️ 復古經典</span>' }
+  [SKINS.TACTICAL]: { text: '特工：戰術排雷', badge: 'Tactical Ops', label: '<span>🤖 戰術特工</span>' },
+  [SKINS.DUNGEON]: { text: '地宮：掃雷冒險', badge: 'Dungeon Sweeper', label: '<span>🗺️ 地宮探險</span>' },
+  [SKINS.CLASSIC]: { text: '掃雷：純粹經典', badge: 'Minesweeper', label: '<span>🖥️ 復古經典</span>' }
 };
 
 const ACTION_MODES = {
@@ -64,71 +64,30 @@ const DUNGEON_FLOORS = [
 // --------------------------------------------------------------------------
 class SweeperSoundManager {
   constructor() {
-    this.ctx = null;
-    this.enabled = true;
-    try {
-      const pref = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
-      if (pref.sound !== undefined) this.enabled = !!pref.sound;
-    } catch (_) {}
-    this.bindLifecycle();
+    // 瀏覽器樣板（AudioContext 延後建立／手勢解鎖／visibilitychange／開關持久化／
+    // 節點回收）全部交給共用模組 BoboAudio，這個類別只負責本遊戲的音色。
+    // 模組缺席時（例如 Node 單元測試環境）kit 為 null，所有音效安靜退場，遊戲照常可玩。
+    this.kit = (typeof BoboAudio !== 'undefined' && BoboAudio)
+      ? BoboAudio.create({ storageKey: PREF_KEY, storageField: 'sound' })
+      : null;
+    // 模組缺席時仍保留一個記憶體開關，音效按鈕的圖示與提示文字才不會卡住
+    this.fallbackEnabled = true;
   }
 
-  bindLifecycle() {
-    if (typeof document === 'undefined') return;
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        if (this.ctx && this.ctx.state === 'running') {
-          this.ctx.suspend().catch(() => {});
-        }
-      } else {
-        if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume().catch(() => {});
-        }
-      }
-    });
-  }
-
-  init() {
-    if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AudioCtx();
-    }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
+  get enabled() {
+    return this.kit ? this.kit.enabled : this.fallbackEnabled;
   }
 
   toggle() {
-    this.enabled = !this.enabled;
-    try {
-      const pref = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
-      pref.sound = this.enabled;
-      localStorage.setItem(PREF_KEY, JSON.stringify(pref));
-    } catch (_) {}
-    return this.enabled;
+    if (this.kit) return this.kit.toggle();
+    this.fallbackEnabled = !this.fallbackEnabled;
+    return this.fallbackEnabled;
   }
 
-  playTone(freq, type = 'sine', duration = 0.08, gainVal = 0.15, decay = 0.04) {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, now);
-      gain.gain.setValueAtTime(gainVal, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now);
-      osc.stop(now + duration);
-    } catch (_) {}
+  // 本遊戲所有音色的衰減終點都是 0.001，統一在各處明確傳入
+  playTone(freq, type = 'sine', duration = 0.08, gainVal = 0.15) {
+    if (!this.kit) return;
+    this.kit.tone({ freq, type, duration, gain: gainVal, floor: 0.001 });
   }
 
   playDig(skin = SKINS.TACTICAL) {
@@ -143,122 +102,56 @@ class SweeperSoundManager {
   }
 
   playFlag() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(440, now);
-      osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
-      gain.gain.setValueAtTime(0.18, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.08);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({ from: 440, to: 880, type: 'triangle', duration: 0.08, gain: 0.18, floor: 0.001 });
   }
 
   playUnflag() {
     this.playTone(380, 'sine', 0.05, 0.1);
   }
 
+  // 琶音一律改用音訊時鐘排程（stagger / delay），主執行緒卡頓時也不會抖
   playChord() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    [523.25, 659.25, 783.99].forEach((freq, idx) => {
-      setTimeout(() => this.playTone(freq, 'sine', 0.1, 0.12), idx * 25);
+    if (!this.kit) return;
+    this.kit.chord([523.25, 659.25, 783.99], {
+      type: 'sine', duration: 0.1, gain: 0.12, stagger: 0.025, floor: 0.001
     });
   }
 
   playShield() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(300, now);
-      osc.frequency.exponentialRampToValueAtTime(1200, now + 0.25);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.25);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({ from: 300, to: 1200, type: 'sawtooth', duration: 0.25, gain: 0.2, floor: 0.001 });
   }
 
   playRadar() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    [1046.5, 1318.51, 1567.98].forEach((freq, idx) => {
-      setTimeout(() => this.playTone(freq, 'sine', 0.14, 0.15), idx * 80);
+    if (!this.kit) return;
+    this.kit.chord([1046.5, 1318.51, 1567.98], {
+      type: 'sine', duration: 0.14, gain: 0.15, stagger: 0.08, floor: 0.001
     });
   }
 
   playCoin() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    this.playTone(987.77, 'triangle', 0.08, 0.2);
-    setTimeout(() => this.playTone(1318.51, 'triangle', 0.15, 0.2), 60);
+    if (!this.kit) return;
+    this.kit.chord(
+      [{ freq: 987.77, duration: 0.08 }, { freq: 1318.51, duration: 0.15, delay: 0.06 }],
+      { type: 'triangle', gain: 0.2, floor: 0.001 }
+    );
   }
 
   playDamage() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(180, now);
-      osc.frequency.exponentialRampToValueAtTime(60, now + 0.2);
-      gain.gain.setValueAtTime(0.25, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.2);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({ from: 180, to: 60, type: 'square', duration: 0.2, gain: 0.25, floor: 0.001 });
   }
 
   playExplode() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(120, now);
-      osc.frequency.exponentialRampToValueAtTime(30, now + 0.4);
-      gain.gain.setValueAtTime(0.35, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.4);
-    } catch (_) {}
+    if (!this.kit) return;
+    this.kit.sweep({ from: 120, to: 30, type: 'sawtooth', duration: 0.4, gain: 0.35, floor: 0.001 });
   }
 
   playWin() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-    const notes = [523.25, 659.25, 783.99, 1046.5];
-    notes.forEach((f, i) => {
-      setTimeout(() => this.playTone(f, 'sine', 0.2, 0.2), i * 100);
+    if (!this.kit) return;
+    this.kit.chord([523.25, 659.25, 783.99, 1046.5], {
+      type: 'sine', duration: 0.2, gain: 0.2, stagger: 0.1, floor: 0.001
     });
   }
 }
@@ -631,15 +524,10 @@ class MinesweeperApp {
   // Preferences, Skin & Theme Sync
   // ------------------------------------------------------------------------
   initSkinAndTheme() {
-    // 1. Sync Theme
-    try {
-      const homePref = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-      const curTheme = ['dark', 'light'].includes(homePref.theme)
-        ? homePref.theme
-        : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      document.documentElement.dataset.theme = curTheme;
-      this.updateThemeIcon(curTheme);
-    } catch (_) {}
+    // 1. Sync Theme：主題一律交給共用 BoboTheme（它負責讀首頁偏好、跟隨系統色與同步 meta）
+    const themeKit = (typeof BoboTheme !== 'undefined') ? BoboTheme : null;
+    // 模組缺席時不自行重讀偏好，直接沿用 <head> 防閃爍腳本已寫上的主題
+    this.updateThemeIcon(themeKit ? themeKit.init() : this.readAppliedTheme());
 
     // 2. Sync Skin
     try {
@@ -686,16 +574,28 @@ class MinesweeperApp {
     this.sound.playTone(800, 'sine', 0.08);
   }
 
-  toggleTheme() {
-    const curTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = curTheme;
-    this.updateThemeIcon(curTheme);
-
+  // 讀出畫面上目前掛著的主題；BoboTheme 缺席時的最小備援，不碰 localStorage
+  readAppliedTheme() {
     try {
-      const homePref = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-      homePref.theme = curTheme;
-      localStorage.setItem('bobo-home-preferences-v2', JSON.stringify(homePref));
-    } catch (_) {}
+      if (typeof document === 'undefined') return 'light';
+      return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    } catch (_) {
+      return 'light';
+    }
+  }
+
+  toggleTheme() {
+    const themeKit = (typeof BoboTheme !== 'undefined') ? BoboTheme : null;
+    // 共用模組負責寫回 bobo-home-preferences-v2，且只改 theme 欄位，不會動到首頁的排序與隱藏設定
+    if (themeKit) {
+      this.updateThemeIcon(themeKit.toggle());
+      return;
+    }
+
+    // 模組缺席時仍可當場切換，只是不持久化（重整後回到 prefers-color-scheme）
+    const curTheme = this.readAppliedTheme() === 'dark' ? 'light' : 'dark';
+    if (typeof document !== 'undefined') document.documentElement.dataset.theme = curTheme;
+    this.updateThemeIcon(curTheme);
   }
 
   updateThemeIcon(theme) {
@@ -1989,52 +1889,15 @@ class MinesweeperApp {
     }, 2400);
   }
 
+  // 彩帶走共用 BoboConfetti：內建 prefers-reduced-motion 守衛、高 DPI 處理
+  // 與 cancelAnimationFrame 收尾；模組缺席時安靜退場，不影響遊戲進行
   triggerConfetti() {
     if (!this.el.confettiCanvas) return;
-    const canvas = this.el.confettiCanvas;
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const pieces = [];
-    const colors = ['#38bdf8', '#fbbf24', '#f43f5e', '#34d399', '#a855f7'];
-
-    for (let i = 0; i < 90; i++) {
-      pieces.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height * 0.4,
-        size: Math.random() * 8 + 4,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        vx: (Math.random() - 0.5) * 6,
-        vy: Math.random() * 4 + 2,
-        rot: Math.random() * 360,
-        dRot: (Math.random() - 0.5) * 8
-      });
-    }
-
-    let frames = 0;
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      pieces.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.rot += p.dRot;
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate((p.rot * Math.PI) / 180);
-        ctx.fillStyle = p.color;
-        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
-        ctx.restore();
-      });
-
-      frames++;
-      if (frames < 90) {
-        requestAnimationFrame(animate);
-      } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-    requestAnimationFrame(animate);
+    const confettiKit = (typeof BoboConfetti !== 'undefined') ? BoboConfetti : null;
+    if (!confettiKit) return;
+    try {
+      confettiKit.burst(this.el.confettiCanvas);
+    } catch (_) {}
   }
 }
 

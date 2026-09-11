@@ -5,170 +5,62 @@
 const STORAGE_KEY = 'loop_game_state';
 const STATS_KEY = 'loop_game_stats';
 
+/* 音效：薄薄一層音色定義，底下的 AudioContext 樣板一律交給共用模組 BoboAudio。
+   共用模組必須可缺席：載入失敗時遊戲照常玩，只是完全沒有音效。 */
 class SoundManager {
   constructor() {
-    this.ctx = null;
-    this.enabled = true;
-    try {
-      this.enabled = localStorage.getItem('loopnet_sound') !== 'false';
-    } catch (_) {}
-    this.bindLifecycle();
+    this.kit = (typeof BoboAudio !== 'undefined' && BoboAudio)
+      ? BoboAudio.create({ storageKey: 'loopnet_sound' })
+      : null;
   }
 
-  bindLifecycle() {
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        if (this.ctx && this.ctx.state === 'running') {
-          this.ctx.suspend().catch(() => {});
-        }
-      } else {
-        if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume().catch(() => {});
-        }
-      }
-    });
+  /* 目前是否發聲；模組缺席時恆為 false，UI 會顯示靜音圖示 */
+  get enabled() {
+    return this.kit ? this.kit.enabled : false;
   }
 
-  init() {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) this.ctx = new AudioCtx();
-    }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-  }
-
+  /* 切換音效並寫回 loopnet_sound，回傳切換後的狀態 */
   toggleSound() {
-    this.enabled = !this.enabled;
-    try {
-      localStorage.setItem('loopnet_sound', this.enabled);
-    } catch (_) {}
-    return this.enabled;
+    return this.kit ? this.kit.toggle() : false;
   }
 
   /* 旋轉開關點擊音效 (Relay Switch Click) */
   playRotate() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(520, now);
-    osc.frequency.exponentialRampToValueAtTime(180, now + 0.04);
-
-    gain.gain.setValueAtTime(0.22, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.04);
+    if (!this.kit) return;
+    this.kit.sweep({
+      from: 520, to: 180, type: 'triangle', duration: 0.04, gain: 0.22, floor: 0.001
+    });
   }
 
   /* 電流導通音效 (Electric Zap / Flow) */
   playFlow() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    [587.33, 739.99, 880.00].forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(freq, now + i * 0.02);
-
-      gain.gain.setValueAtTime(0.05, now + i * 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.02 + 0.12);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.02);
-      osc.stop(now + i * 0.02 + 0.12);
+    if (!this.kit) return;
+    this.kit.chord([587.33, 739.99, 880.00], {
+      type: 'sawtooth', duration: 0.12, gain: 0.05, stagger: 0.02, floor: 0.001
     });
   }
 
   /* 燈泡點亮叮噹音效 (Bulb Light-Up Chime) */
   playBulbLight() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    [659.25, 987.77, 1318.51].forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + i * 0.035);
-
-      gain.gain.setValueAtTime(0.12, now + i * 0.035);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.035 + 0.25);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.035);
-      osc.stop(now + i * 0.035 + 0.25);
+    if (!this.kit) return;
+    this.kit.chord([659.25, 987.77, 1318.51], {
+      type: 'sine', duration: 0.25, gain: 0.12, stagger: 0.035, floor: 0.001
     });
   }
 
   /* 提示音效 (Hint Chime) */
   playHint() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    [659.25, 880, 1174.66].forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + i * 0.05);
-
-      gain.gain.setValueAtTime(0.12, now + i * 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.22);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.05);
-      osc.stop(now + i * 0.05 + 0.22);
+    if (!this.kit) return;
+    this.kit.chord([659.25, 880, 1174.66], {
+      type: 'sine', duration: 0.22, gain: 0.12, stagger: 0.05, floor: 0.001
     });
   }
 
   /* 勝利電力全開和弦 (Power Victory Fanfare) */
   playWin() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
-    notes.forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + i * 0.07);
-
-      gain.gain.setValueAtTime(0.2, now + i * 0.07);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.45);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now + i * 0.07);
-      osc.stop(now + i * 0.07 + 0.45);
+    if (!this.kit) return;
+    this.kit.chord([523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98], {
+      type: 'triangle', duration: 0.45, gain: 0.2, stagger: 0.07, floor: 0.001
     });
   }
 }
@@ -192,6 +84,7 @@ class LoopNetGame {
     this.isWon = false;
     this.lastPoweredCount = 0;
     this.lastPoweredBulbCount = 0;
+    this.confettiStop = null; // BoboConfetti.burst() 回傳的收尾函式
 
     // 音效管理器
     this.sound = new SoundManager();
@@ -234,31 +127,50 @@ class LoopNetGame {
   /* ------------------------------------------------------------------------
      主題與設定 (相容首頁 bobo-home-preferences-v2)
      ------------------------------------------------------------------------ */
-  setupTheme() {
-    let savedTheme = 'light';
+  /* 讀取本遊戲自己的舊偏好 key；沒有或值不合法時回 null */
+  readLocalTheme() {
     try {
-      const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-      if (prefs.theme && ['dark', 'light'].includes(prefs.theme)) {
-        savedTheme = prefs.theme;
-      } else if (localStorage.getItem('loopnet_theme')) {
-        savedTheme = localStorage.getItem('loopnet_theme');
-      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        savedTheme = 'dark';
-      }
+      const stored = localStorage.getItem('loopnet_theme');
+      if (stored === 'dark' || stored === 'light') return stored;
     } catch (_) {}
+    return null;
+  }
 
-    document.documentElement.setAttribute('data-theme', savedTheme);
+  setupTheme() {
+    // 共用主題模組必須可缺席：載入失敗時退回 loopnet_theme 與 prefers-color-scheme
+    const themeKit = (typeof BoboTheme !== 'undefined') ? BoboTheme : null;
+    const localTheme = this.readLocalTheme();
+    let savedTheme;
+
+    if (themeKit) {
+      if (themeKit.hasExplicitPreference() || !localTheme) {
+        // 首頁已存過主題、或本遊戲沒有舊偏好：交給共用模組決定並跟隨系統主題變化
+        savedTheme = themeKit.init();
+      } else {
+        // 只有舊版 loopnet_theme 的使用者：沿用它，不讓系統主題蓋掉
+        savedTheme = themeKit.apply(localTheme);
+      }
+    } else {
+      savedTheme = localTheme
+        || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+
     this.updateThemeIcon(savedTheme);
 
     this.dom.themeBtn.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
+      let next;
+      if (themeKit) {
+        // toggle() 會套用主題，並且「只改」bobo-home-preferences-v2 的 theme 欄位
+        next = themeKit.toggle();
+      } else {
+        const current = document.documentElement.getAttribute('data-theme');
+        next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+      }
+      // 保留本遊戲自己的偏好 key
       try {
         localStorage.setItem('loopnet_theme', next);
-        const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-        prefs.theme = next;
-        localStorage.setItem('bobo-home-preferences-v2', JSON.stringify(prefs));
       } catch (_) {}
       this.updateThemeIcon(next);
     });
@@ -506,6 +418,7 @@ class LoopNetGame {
      遊戲流程與狀態控制
      ------------------------------------------------------------------------ */
   startNewGame() {
+    this.stopConfetti();
     this.isWon = false;
     this.moves = 0;
     this.lastPoweredCount = 0;
@@ -1066,52 +979,31 @@ class LoopNetGame {
     }, 600);
   }
 
+  /* 彩帶改走共用模組 BoboConfetti；模組缺席時安靜退場，遊戲照常能玩 */
   triggerConfetti() {
     const canvas = this.dom.confettiCanvas;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth || document.documentElement.clientWidth;
-    canvas.height = window.innerHeight || document.documentElement.clientHeight;
-
-    const particles = Array.from({ length: 45 }, () => ({
-      x: canvas.width / 2,
-      y: canvas.height / 2,
-      vx: (Math.random() - 0.5) * 14,
-      vy: (Math.random() - 0.8) * 12,
-      color: ['#F59E0B', '#FBBF24', '#10B981', '#38BDF8', '#818CF8'][Math.floor(Math.random() * 5)],
-      size: Math.random() * 6 + 4,
+    const confetti = (typeof BoboConfetti !== 'undefined') ? BoboConfetti : null;
+    if (!confetti) return;
+    // 參數完全比照本遊戲原本那份實作，接共用模組不改變既有的慶祝手感：
+    // 45 顆圓點從畫面中心爆開、帶重力落下並淡出，配電力色票（琥珀／翠綠／天藍／靛紫）
+    this.confettiStop = confetti.burst(canvas, {
+      colors: ['#F59E0B', '#FBBF24', '#10B981', '#38BDF8', '#818CF8'],
+      pieces: 45,
+      origin: 'center',
+      shape: 'circle',
+      spread: 14,
       gravity: 0.28,
-      alpha: 1
-    }));
+      fade: 0.022
+    });
+  }
 
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      let stillAlive = false;
-
-      particles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += p.gravity;
-        p.alpha -= 0.022;
-
-        if (p.alpha > 0) {
-          stillAlive = true;
-          ctx.globalAlpha = Math.max(0, p.alpha);
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      if (stillAlive) {
-        requestAnimationFrame(animate);
-      } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-
-    animate();
+  /* 開新局時收掉還在飛的彩帶（模組會 cancelAnimationFrame 並清空畫布） */
+  stopConfetti() {
+    if (typeof this.confettiStop === 'function') {
+      this.confettiStop();
+      this.confettiStop = null;
+    }
   }
 }
 
