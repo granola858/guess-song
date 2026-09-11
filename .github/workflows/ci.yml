@@ -1,0 +1,47 @@
+# main 的守門：dev → main 的 PR 一定要通過這裡才能合併。
+#
+# 分工的理由：
+#   推 dev  → 本機 pre-push hook 只跑單元測試（1 秒，不擋手）
+#   PR 進 main → 這裡跑單元測試 + 開真的 Chrome 跑全站冒煙測試（約 1 分鐘）
+#
+# 本機 hook 擋不到 main —— 因為合併是在 GitHub 伺服器上做的，
+# 本機從來不會 git push origin main，pre-push 一次都不會觸發。
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 單元測試與全站冒煙測試
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 取出原始碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 本專案根目錄零 dependencies，不需要 npm ci。
+      # （games/guess-song 是唯一有相依的子專案，但它的 dist/ 已提交進版控。）
+
+      - name: 單元測試
+        run: npm test
+
+      - name: 全站冒煙測試（開真的 Chrome 跑每一款遊戲）
+        env:
+          # ubuntu-latest 目前是 24.04，AppArmor 擋掉了非特權 user namespace，
+          # Chrome headless 一定要 --no-sandbox 才起得來。
+          # --disable-dev-shm-usage 則是避免 runner 的 /dev/shm 太小導致分頁崩潰。
+          CHROME_FLAGS: '--no-sandbox --disable-dev-shm-usage'
+          # ubuntu-latest 預裝的 Chrome 路徑；driver.mjs 的候選清單只有 Windows 路徑，
+          # 所以這裡一定要明確指定。
+          CHROME_PATH: /usr/bin/google-chrome
+        run: npm run smoke -- --no-shots

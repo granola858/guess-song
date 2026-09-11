@@ -1,15 +1,21 @@
 #!/bin/sh
-# 推送前把遊戲真的開進瀏覽器跑一遍，擋掉會崩潰的改動。
+# 推送前的把關。
 #
 # 啟用方式（clone 後跑一次即可，已在 SKILL.md 記錄）：
 #   git config core.hooksPath .githooks
 #
 # 真的要跳過時：git push --no-verify
+#
+# ── 為什麼這裡只跑單元測試 ──────────────────────────────────────────
+# 發布流程是 dev → main（在 GitHub 上開 PR 合併），所以 main 從來不會被
+# 本機 push —— 本機 hook 對 main 一次都不會觸發。真正能擋的位置只有「推 dev」。
+#
+# 單元測試 1 秒，適合放在每次推送；開瀏覽器的全站冒煙測試要一分鐘，
+# 每次推 dev 都等會讓人想 --no-verify，那就等於沒有把關。
+# 所以冒煙測試移到 .github/workflows/ci.yml，在 PR 進 main 時跑。
+#
+# 想在本機手動跑冒煙測試：npm run smoke
 
-# pre-push 從 stdin 收到每一條要推的 ref：
-#   <local ref> <local sha> <remote ref> <remote sha>
-# 發版流程會先推分支、再單獨推 tag。分支那次已經驗過了，
-# tag 那次沒必要再等一分鐘，所以純 tag 的推送直接放行。
 has_branch=0
 while read -r _local_ref _local_sha remote_ref _remote_sha; do
   [ -z "$remote_ref" ] && continue
@@ -32,14 +38,5 @@ if ! npm test --silent; then
   exit 1
 fi
 
-echo "pre-push：開瀏覽器跑全站冒煙測試（約 1 分鐘）…"
-if ! npm run smoke --silent -- --no-shots; then
-  echo ""
-  echo "❌ 有遊戲在瀏覽器裡噴錯，推送中止。"
-  echo "   想看截圖找原因：npm run smoke"
-  echo "   真的要推：git push --no-verify"
-  exit 1
-fi
-
-echo "✅ pre-push 全部通過。"
+echo "✅ pre-push 單元測試通過（冒煙測試會在 PR 進 main 時由 CI 跑）。"
 exit 0

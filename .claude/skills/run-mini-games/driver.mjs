@@ -168,6 +168,9 @@ export class Driver {
       '--no-first-run', '--no-default-browser-check', '--disable-extensions',
       '--disable-gpu', '--hide-scrollbars', '--mute-audio',
       '--window-size=1280,900',
+      // CI 容器裡通常要 --no-sandbox（Ubuntu 24.04 的 AppArmor 擋掉了非特權 user namespace）。
+      // 本機不需要也不該加，所以用環境變數帶進來：CHROME_FLAGS="--no-sandbox --disable-dev-shm-usage"
+      ...(process.env.CHROME_FLAGS ? process.env.CHROME_FLAGS.split(/\s+/).filter(Boolean) : []),
       'about:blank',
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
     this.chrome.stderr.on('data', () => {});
