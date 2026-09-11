@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#7f5539">
+  <title>波波 2048 - 波波小遊戲</title>
+  <meta name="description" content="經典 2048 數字合併遊戲，提供 3×3 口袋局、4×4 正統局、5×5 大局三種盤面與加時閃電模式，支援滑動手勢、悔棋、數字與進化兩種皮膚，還有完整戰績統計。">
+
+  <!-- 字型引入 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+
+  <!-- 防止深色模式與皮膚閃爍：在樣式表套用前就把偏好寫進 documentElement -->
+  <script>
+    (() => {
+      try {
+        const homePref = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
+        const theme = ['dark', 'light'].includes(homePref.theme)
+          ? homePref.theme
+          : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+      try {
+        const pref = JSON.parse(localStorage.getItem('g2048_pref_v1') || '{}');
+        const skin = ['number', 'evolve'].includes(pref.skin) ? pref.skin : 'number';
+        document.documentElement.dataset.skin = skin;
+      } catch (_) {
+        document.documentElement.dataset.skin = 'number';
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="2048.css">
+</head>
+<body>
+
+  <!-- 全螢幕慶祝彩帶畫布 -->
+  <canvas id="confetti-canvas"></canvas>
+
+  <!-- 浮動通知容器 -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <!-- 主要遊戲容器 -->
+  <div class="page-container">
+
+    <!-- 1. 頂部導航列 -->
+    <header class="top-bar">
+      <a href="../../index.html" class="back-btn" aria-label="返回首頁">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+        <span>回首頁</span>
+      </a>
+
+      <div class="top-actions">
+        <!-- 皮膚鍵是「數字／進化」兩態切換，用 aria-pressed 表達目前是否為進化皮膚；
+             預設數字皮膚（false），JS 會在 init 時依實際偏好同步。 -->
+        <button class="icon-btn" id="skin-btn" type="button" aria-label="切換磚塊皮膚" aria-pressed="false" title="切換磚塊皮膚（數字／進化）">
+          <span aria-hidden="true">🎨</span>
+        </button>
+        <!-- 主題鍵同樣是兩態切換，aria-pressed 表示目前是否為深色；JS 會在 init 時同步。 -->
+        <button class="icon-btn" id="theme-btn" type="button" aria-label="切換深淺色模式" aria-pressed="false" title="切換深淺色">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/>
+          </svg>
+        </button>
+        <button class="icon-btn" id="sound-btn" type="button" aria-label="音效開關" aria-pressed="true" title="音效開關">
+          <span aria-hidden="true">🔊</span>
+        </button>
+        <button class="icon-btn" id="stats-btn" type="button" aria-label="戰績紀錄" title="戰績統計">
+          <span aria-hidden="true">📊</span>
+        </button>
+        <button class="icon-btn" id="help-btn" type="button" aria-label="玩法教學" title="規則說明">
+          <span aria-hidden="true">❓</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. 主標題 -->
+    <section class="game-header">
+      <h1 class="main-title">
+        <span class="main-title-text" id="title-text">波波 2048</span>
+        <span class="main-title-badge" id="title-badge">2048</span>
+      </h1>
+    </section>
+
+    <!-- 3. 遊戲模式分頁標籤 -->
+    <nav class="mode-tabs" id="mode-tabs" role="tablist" aria-label="遊戲模式選擇">
+      <button class="mode-tab-btn active" data-mode="classic" role="tab" aria-selected="true" type="button">
+        <span>🎯 經典無盡</span>
+      </button>
+      <button class="mode-tab-btn" data-mode="blitz" role="tab" aria-selected="false" type="button">
+        <span>⚡ 加時閃電</span>
+      </button>
+    </nav>
+
+    <!-- 4. 盤面大小切換列（加時閃電固定 4×4，此列會被隱藏） -->
+    <div class="size-bar" id="size-bar" role="group" aria-label="盤面大小">
+      <button class="size-btn" data-size="3" type="button" aria-pressed="false">3×3</button>
+      <button class="size-btn active" data-size="4" type="button" aria-pressed="true">4×4</button>
+      <button class="size-btn" data-size="5" type="button" aria-pressed="false">5×5</button>
+    </div>
+
+    <!-- 5. 分數與計時 HUD 面板（數值一律由 JS 填入，HTML 不預先寫死） -->
+    <section class="hud-panel" aria-label="分數與計時狀態">
+      <div class="hud-row">
+        <div class="score-box">
+          <span class="score-label">分數</span>
+          <span class="score-value" id="score"></span>
+        </div>
+        <div class="score-box">
+          <span class="score-label">最佳</span>
+          <span class="score-value" id="best"></span>
+        </div>
+        <div class="score-box">
+          <span class="score-label">目標</span>
+          <span class="score-value" id="target"></span>
+        </div>
+      </div>
+
+      <!-- 加時閃電專用倒數列；經典模式整列隱藏 -->
+      <div class="blitz-bar" id="blitz-bar" hidden>
+        <span class="blitz-time" id="blitz-time"></span>
+        <div class="blitz-track" aria-hidden="true">
+          <div class="blitz-fill" id="blitz-fill"></div>
+        </div>
+        <span class="chain-badge" id="chain-badge" hidden></span>
+      </div>
+
+      <!-- 得分浮動提示（+16），由 JS 在合併時填入並顯示 -->
+      <div class="gain-float" id="gain-float" aria-hidden="true" hidden></div>
+    </section>
+
+    <!-- 6. 棋盤主體：背景格與磚塊全部由 JS 生成，HTML 保持空容器 -->
+    <main class="board-frame" id="board-frame" style="--n:4">
+      <div class="board-grid" id="board-grid" aria-hidden="true"></div>
+      <!-- 磚塊是絕對定位的浮動節點、沒有列（row）結構，
+           用 role="grid" 會構成無效的 ARIA 結構（grid 的子代必須是 role="row"），
+           因此這層採用 role="group" 作為單純的具名容器。 -->
+      <div class="tile-layer" id="tile-layer" role="group" aria-label="2048 盤面"></div>
+      <div class="board-overlay" id="board-overlay" hidden></div>
+    </main>
+
+  </div>
+
+  <!-- 7. 底部懸浮觸控動作列 -->
+  <nav class="thumb-action-bar" aria-label="遊戲動作">
+    <button class="action-btn" id="undo-btn" type="button" aria-label="悔棋，退回上一步">
+      <span class="btn-icon" aria-hidden="true">↩️</span>
+      <span>悔棋</span>
+      <span class="btn-badge" id="undo-badge"></span>
+    </button>
+    <button class="action-btn" id="restart-btn" type="button" aria-label="重新開始一局">
+      <span class="btn-icon" aria-hidden="true">🔄</span>
+      <span>重開</span>
+    </button>
+    <button class="action-btn" id="glyph-btn" type="button" aria-label="純圖示模式，隱藏磚塊上的數字" aria-pressed="false">
+      <span class="btn-icon" aria-hidden="true">🎭</span>
+      <span>純圖示</span>
+    </button>
+  </nav>
+
+  <!-- ======================================================================
+       彈出視窗：本局結算 (Result Modal)
+       ====================================================================== -->
+  <div class="modal-overlay" id="result-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="result-title-text" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title">
+          <span class="result-emoji" id="result-emoji"></span>
+          <span id="result-title-text"></span>
+        </h2>
+        <button class="modal-close-btn" id="result-close-btn" type="button" aria-label="關閉結算">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-label">本局分數</div>
+            <div class="stat-val" id="result-score">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">最佳分數</div>
+            <div class="stat-val" id="result-best">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">最大磚塊</div>
+            <div class="stat-val" id="result-maxtile">--</div>
+          </div>
+        </div>
+        <p class="result-detail" id="result-detail"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="result-continue-btn" type="button" hidden>繼續挑戰 →</button>
+        <button class="btn-primary" id="result-again-btn" type="button">再來一局</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       彈出視窗：動作確認 (Confirm Modal)
+       ====================================================================== -->
+  <div class="modal-overlay" id="confirm-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="confirm-title" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title" id="confirm-title"></h2>
+        <button class="modal-close-btn" id="confirm-close-btn" type="button" aria-label="關閉確認視窗">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-text"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="confirm-cancel-btn" type="button">再想想</button>
+        <button class="btn-primary" id="confirm-ok-btn" type="button">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       彈出視窗：戰績統計 (Stats Modal)
+       ====================================================================== -->
+  <div class="modal-overlay" id="stats-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-label="戰績統計" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title">📊 波波 2048 戰績</h2>
+        <button class="modal-close-btn" id="stats-close-btn" type="button" aria-label="關閉戰績">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="size-bar" id="stats-size-tabs" role="group" aria-label="查看各盤面大小的戰績">
+          <button class="size-btn" data-statsize="3" type="button" aria-pressed="false">3×3</button>
+          <button class="size-btn active" data-statsize="4" type="button" aria-pressed="true">4×4</button>
+          <button class="size-btn" data-statsize="5" type="button" aria-pressed="false">5×5</button>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-label">總場次</div>
+            <div class="stat-val" id="stat-plays">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">最高分</div>
+            <div class="stat-val" id="stat-best">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">最大磚塊</div>
+            <div class="stat-val" id="stat-maxtile">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">達標次數</div>
+            <div class="stat-val" id="stat-hits">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">最高連續達標</div>
+            <div class="stat-val" id="stat-streak">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">最少步數達標</div>
+            <div class="stat-val" id="stat-fewest">--</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="stats-reset-btn" type="button">清除紀錄</button>
+        <button class="btn-primary" id="stats-ok-btn" type="button">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       彈出視窗：玩法說明 (Help Modal)
+       ====================================================================== -->
+  <div class="modal-overlay" id="help-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-label="玩法說明" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title">📖 波波 2048 玩法指南</h2>
+        <button class="modal-close-btn" id="help-close-btn" type="button" aria-label="關閉說明">&times;</button>
+      </div>
+      <div class="modal-body">
+        <h3>🎯 基本規則</h3>
+        <p>往<strong>上、下、左、右</strong>任一方向滑動，盤面上所有磚塊會一起朝那個方向靠攏到底。兩顆<strong>面值相同</strong>的磚塊相撞時會合併成一顆，面值變成兩倍，合併出來的數字就是你這一步的得分。</p>
+        <p>每走完<strong>有效的一步</strong>（盤面真的有變化）之後，空格裡會生成<strong>一顆新磚</strong>。滑到底撞牆、盤面完全沒變的話不算一步，也不會生成新磚。</p>
+        <p>同一步之內，<strong>剛合併出來的磚不會再被合併第二次</strong>。例如一整列是 <code>2 2 2 2</code>，往左滑會變成 <code>4 4</code> 而不是 <code>8</code>。</p>
+        <p>當盤面被填滿、而且上下左右都找不到任何一對相鄰的同值磚時，這一局就結束了。</p>
+
+        <h3>📐 三種盤面與各自的目標</h3>
+        <ul>
+          <li><strong>3×3 口袋局</strong>：目標磚是 <strong>128</strong>。格子少、容錯低，而且<strong>只會生成 2</strong>，完全不會冒出 4 來救你。</li>
+          <li><strong>4×4 正統局</strong>：目標磚是 <strong>2048</strong>，原汁原味的經典規格，新磚有 <strong>10%</strong> 的機率是 4。</li>
+          <li><strong>5×5 大局</strong>：目標磚是 <strong>4096</strong>。格子多、局也長，新磚有 <strong>20%</strong> 的機率是 4。</li>
+        </ul>
+        <p>三種盤面開局都先放<strong>兩顆</strong>磚，戰績也是<strong>各自分開</strong>統計的。</p>
+
+        <h3>🚀 達標之後還能繼續挑戰</h3>
+        <p>合出目標磚的瞬間，這局的<strong>達標紀錄就已經存檔了</strong>。你可以按結算視窗的「<strong>繼續挑戰 →</strong>」接著往上疊，就算之後塞死也<strong>不會取消</strong>剛才的達標成績，放心往 4096、8192 衝。</p>
+
+        <h3>↩️ 悔棋 3 次</h3>
+        <p>經典模式每局有 <strong>3 次悔棋</strong>，每次退回<strong>上一步</strong>（只保留一份快照，所以要再走一步之後才能再悔一次）。</p>
+        <p>請注意：只要<strong>用過任何一次悔棋</strong>，這局就<strong>不列入排行榜</strong>，成績只會記在練習紀錄裡，不會更新最高分、最大磚塊與連續達標。想拚正式紀錄就一次都別按。</p>
+
+        <h3>⚡ 加時閃電模式</h3>
+        <ul>
+          <li>起始時間 <strong>90 秒</strong>，倒數歸零就結束，時間上限是 <strong>180 秒</strong>。</li>
+          <li><strong>每次合併都會回血</strong>：合出 2<sup>n</sup> 的磚就加 <strong>(n − 1) × 0.4 秒</strong>——合出 8 加 0.8 秒、合出 64 加 2 秒、合出 512 加 3.2 秒，越大顆補越多。</li>
+          <li><strong>連鎖加成</strong>：同一步合出 <strong>3 組以上</strong>，再額外獎勵 <strong>1.5 秒</strong>。</li>
+          <li>盤面固定 <strong>4×4</strong>，而且<strong>不提供悔棋</strong>，一步都不能反悔。</li>
+        </ul>
+
+        <h3>📱 操作說明</h3>
+        <ul>
+          <li><strong>滑動</strong>：在棋盤上往任一方向滑（手指、觸控筆或滑鼠拖曳都可以），一次手勢只會推一步。斜著滑不會觸發，快速輕掃只要走一半距離就算數。</li>
+          <li><strong>鍵盤</strong>：<strong>方向鍵</strong>或 <strong>W / A / S / D</strong> 對應上左下右。</li>
+          <li><strong>Z</strong>：悔棋。<strong>R</strong>：重開一局。<strong>Esc</strong>：關閉彈出視窗。</li>
+          <li>焦點在按鈕或分頁上時方向鍵不會被攔截，頁面照樣可以正常操作與捲動。</li>
+        </ul>
+
+        <h3>🎨 兩種皮膚與純圖示模式</h3>
+        <ul>
+          <li><strong>數字皮膚</strong>：最直覺的經典外觀，磚上就是 2、4、8、16⋯⋯。</li>
+          <li><strong>進化皮膚</strong>：用生物演化的圖示代表每一階——🦠 2、🐟 4、🐸 8、🦎 16、🐕 32、🐒 64、🧑 128、🏛️ 256、🚀 512、🪐 1024、🌌 2048、🕳️ 4096、♾️ 8192，一路從單細胞演到無限。右上角的 <strong>🎨</strong> 隨時切換。</li>
+          <li><strong>🎭 純圖示</strong>：底部動作列的開關，開啟後磚塊<strong>只留圖示、藏起數字</strong>，挑戰純靠形狀辨識的硬派玩法。（螢幕報讀軟體仍然會唸出正確的數字。）</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="help-ok-btn" type="button">開始滑動！</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 共用模組與遊戲主程式：順序固定，且都不加 defer / async -->
+  <script src="../../assets/js/bobo-confetti.js"></script>
+  <script src="../../assets/js/bobo-theme.js"></script>
+  <script src="../../assets/js/stats.js"></script>
+  <script src="2048.js"></script>
+  <script>
+    if (typeof Stats !== 'undefined') Stats.recordGamePlay('2048');
+  </script>
+</body>
+</html>
