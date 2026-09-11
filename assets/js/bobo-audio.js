@@ -384,6 +384,15 @@ const BoboAudio = (() => {
      * 使用者手勢時呼叫：建立／喚醒 AudioContext。
      * iOS 還需要播一個 1 frame 的靜音 buffer 才算真的解鎖。
      * 關閉音效時不建立 context（省資源），setEnabled(true) 會再補叫一次。
+     *
+     * 【為什麼 unlocked 只在 running 時才立起來】
+     * 瀏覽器的「使用者啟動」在觸控裝置上是 touchend / pointerup 才成立，
+     * touchstart / pointerdown 那一刻還不算數 —— 這時 new 出來的 AudioContext
+     * 會是 suspended，resume() 也不會過。若在那裡就把 unlocked 記成 true，
+     * 之後任何一次手勢都不會再補播解鎖用的靜音 buffer，玩家進遊戲後
+     * 前幾個聲音會整個消失（症狀：要把音效開關關掉再打開才有聲音）。
+     * 所以每次手勢都補播一次（成本是 1 frame 的靜音 buffer），
+     * 直到 context 真的 running 為止。
      * @returns {Object|null} AudioContext 或 null
      */
     const unlock = () => {
@@ -391,7 +400,7 @@ const BoboAudio = (() => {
       const active = ensureContext();
       if (!active) return null;
       if (unlocked) return active;
-      unlocked = true;
+      if (active.state === 'running') unlocked = true;
       try {
         const source = active.createBufferSource();
         source.buffer = active.createBuffer(1, 1, active.sampleRate || 44100);
@@ -787,7 +796,9 @@ const BoboAudio = (() => {
       } catch (_) {}
     };
 
-    // 使用者手勢：這是 iOS 唯一允許建立／解鎖 AudioContext 的時機
+    // 使用者手勢：這是 iOS 唯一允許建立／解鎖 AudioContext 的時機。
+    // 「按下」與「放開」兩邊都要綁：觸控裝置的使用者啟動要等 touchend / pointerup
+    // 才成立，只綁 pointerdown / touchstart 的話第一次手勢解不開（見 unlock() 的註解）。
     const onGesture = () => {
       try {
         unlock();
@@ -807,7 +818,10 @@ const BoboAudio = (() => {
     if (autoUnlock) {
       const passive = { passive: true };
       bind(doc, 'pointerdown', onGesture, passive);
+      bind(doc, 'pointerup', onGesture, passive);
       bind(doc, 'touchstart', onGesture, passive);
+      bind(doc, 'touchend', onGesture, passive);
+      bind(doc, 'click', onGesture, passive);
       bind(doc, 'keydown', onGesture, passive);
       bind(win, 'pageshow', onWake);
       bind(win, 'focus', onWake);

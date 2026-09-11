@@ -85,7 +85,6 @@
     <section class="game-header">
       <h1 class="main-title">
         <span class="main-title-text" id="title-text">2048</span>
-        <span class="main-title-badge" id="title-badge">2048</span>
       </h1>
     </section>
 
@@ -115,6 +114,9 @@
         <div class="score-box">
           <span class="score-label">分數</span>
           <span class="score-value" id="score"></span>
+          <!-- 得分浮動提示（+16）：必須掛在「分數」這一格裡，才會從分數上方飄出來。
+               掛在 .hud-panel 上的話會定位到面板右上角，也就是「目標」那一格頭上。 -->
+          <div class="gain-float" id="gain-float" aria-hidden="true" hidden></div>
         </div>
         <div class="score-box">
           <span class="score-label">最佳</span>
@@ -143,9 +145,6 @@
         <span class="gold-counter" id="gold-counter"></span>
         <span class="revive-counter" id="revive-counter" hidden></span>
       </div>
-
-      <!-- 得分浮動提示（+16），由 JS 在合併時填入並顯示 -->
-      <div class="gain-float" id="gain-float" aria-hidden="true" hidden></div>
     </section>
 
     <!-- 6. 棋盤主體：背景格與磚塊全部由 JS 生成，HTML 保持空容器 -->

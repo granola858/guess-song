@@ -17,8 +17,7 @@ import { Driver } from './driver.mjs';
 const SKILL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SKILL_DIR, '..', '..', '..');
 
-// 進入點以首頁的卡片連結為準——guess-song 的實際入口是 dist/index.html，
-// 光掃 games/ 目錄會掃到那份跑不起來的 Vite dev 版 index.html。
+// 進入點以首頁的卡片連結為準，再補掃 games/ 目錄把沒被首頁連到的遊戲也跑一遍。
 function entries() {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const found = new Map();

@@ -193,6 +193,10 @@ class MeowSoundEngine {
         if (!ctx) return;
         if (ctx.state === 'suspended') ctx.resume();
         if (this.unlocked) return;
+        // 只有 context 真的 running 才記成已解鎖：觸控裝置的使用者啟動要等
+        // touchend / pointerup 才成立，pointerdown 這一刻建出來的 context 還是
+        // suspended，這時就把旗標立起來會讓解鎖用的靜音 buffer 再也補不回來。
+        if (ctx.state !== 'running') return;
         this.unlocked = true;
         try {
             const source = ctx.createBufferSource();

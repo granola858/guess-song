@@ -1285,7 +1285,6 @@ class ReversiApp {
       statsBtn: byId('stats-btn'),
       helpBtn: byId('help-btn'),
       titleText: byId('title-text'),
-      titleBadge: byId('title-badge'),
 
       // 模式 / 難度 / 執子
       modeTabs: document.querySelectorAll('.mode-tab-btn'),

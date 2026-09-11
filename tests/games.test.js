@@ -7,9 +7,9 @@ const projectRoot = path.resolve(__dirname, '..');
 const gamesRoot = path.join(projectRoot, 'games');
 
 // 自動掃描 games/ 底下所有原生遊戲，新增遊戲不需再手動維護清單。
-// guess-song 為 React/Vite 專案，產出物在 dist/，不適用以下原生資源檢查。
+// 全站現在都是原生靜態頁（唯一的 React/Vite 子專案 guess-song 已下架）。
 const nativeGames = fs.readdirSync(gamesRoot, { withFileTypes: true })
-  .filter(entry => entry.isDirectory() && entry.name !== 'guess-song')
+  .filter(entry => entry.isDirectory())
   .map(entry => entry.name)
   .sort();
 

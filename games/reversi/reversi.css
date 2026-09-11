@@ -304,19 +304,6 @@ body::before {
   white-space: nowrap;
 }
 
-.main-title-badge {
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--accent-primary);
-  color: #ffffff;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  -webkit-text-fill-color: #ffffff;
-  white-space: nowrap;
-}
-
 /* 模式分段控制 */
 .mode-tabs {
   display: flex;
@@ -1000,11 +987,6 @@ html[data-theme="dark"] .score-card.turn-active {
   filter: grayscale(0.7);
 }
 
-.action-btn .btn-icon {
-  font-size: 1.15rem;
-  line-height: 1;
-}
-
 .action-btn[aria-pressed="true"] {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
@@ -1337,11 +1319,6 @@ html[data-theme="dark"] .score-card.turn-active {
     gap: 6px;
   }
 
-  .main-title-badge {
-    font-size: 0.68rem;
-    padding: 2px 6px;
-  }
-
   .hud-panel {
     padding: 8px 10px;
   }
@@ -1392,18 +1369,15 @@ html[data-theme="dark"] .score-card.turn-active {
     padding: 5px 8px;
   }
 
+  /* 四顆按鈕都是純文字（emoji 在各家系統的寬高差很多，窄螢幕上一撐開
+     整列就換行跑版），所以不再收起文字，改成縮字級與內距讓四顆都塞得下。
+     flex-basis 一定要是 auto：這一列是 shrink-to-fit（fixed + translateX(-50%)
+     沒有明確寬度），basis 0 會讓瀏覽器把整列算成很窄，文字反而被壓到溢出。 */
   .action-btn {
-    flex: 0 0 46px;
-    width: 46px;
+    flex: 1 1 auto;
     height: 44px;
-    padding: 6px;
-  }
-
-  /* 只收起文字標籤，提示次數徽章必須留著：
-     :not(.btn-badge) 讓徽章根本不會被這條規則命中，特異度 (0,3,1)，
-     不必靠另一條規則救回來（原本的 .action-btn .btn-badge 只有 (0,2,0)，救不到）。 */
-  .action-btn > span:not(.btn-icon):not(.btn-badge) {
-    display: none;
+    padding: 6px 8px;
+    font-size: 0.82rem;
   }
 }
 
@@ -1423,8 +1397,8 @@ html[data-theme="dark"] .score-card.turn-active {
   }
 
   .action-btn {
-    flex-basis: 42px;
-    width: 42px;
+    padding: 6px 5px;
+    font-size: 0.76rem;
   }
 
   .turn-text {

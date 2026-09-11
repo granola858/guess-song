@@ -14,6 +14,7 @@ const cards = [...html.matchAll(/<article class="game-card"\s+data-id="([^"]+)"\
   .map(([, id, category, search, href, title]) => ({ id, category, search, href, title }));
 
 test('首頁列出 17 個具有唯一 ID 的完整遊戲入口', () => {
+  // 猜歌資料庫已下架（資料來源不再提供），整個 games/guess-song 連同卡片一起移除。
   assert.equal(cards.length, 17);
   assert.equal(new Set(cards.map(card => card.id)).size, cards.length);
   cards.forEach(card => {

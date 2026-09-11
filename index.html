@@ -121,26 +121,6 @@
         拖曳卡片自由排序（觸控請長按卡片或按住「拖曳」把手），也可使用卡片上的箭頭移動；調整會自動儲存。
       </div>
       <div class="game-grid" id="game-grid">
-        <article class="game-card" data-id="guess-song" data-category="tool party" data-search="猜歌資料庫 歌曲 電影 導演 演員 音樂" style="--accent:#7058e8;--soft:#e8e2ff">
-          <a class="card-link" href="games/guess-song/dist/index.html">
-            <span class="card-blob"></span>
-            <span class="card-top">
-              <span class="card-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 18V5l11-2v13"/>
-                  <circle cx="6" cy="18" r="3"/>
-                  <circle cx="17" cy="16" r="3"/>
-                </svg>
-              </span>
-              <span class="card-badge">派對救星</span>
-            </span>
-            <span class="card-content">
-              <h3>猜歌資料庫</h3>
-              <p>快速檢索電影、歌曲、導演與演員，猜歌局的最強輔助。</p>
-              <span class="card-cta">開啟資料庫 →</span>
-            </span>
-          </a>
-        </article>
         <article class="game-card" data-id="association" data-category="party" data-search="聯想遊戲 注音 英文 創意 派對 教學" style="--accent:#ed7049;--soft:#ffe3d8">
           <a class="card-link" href="games/puzzle/index.html">
             <span class="card-blob"></span>
@@ -456,6 +436,33 @@
             </span>
           </a>
         </article>
+        <article class="game-card" data-id="sic-bo" data-category="party logic" data-search="骰寶 骰子 大小 圍骰 押注 下注 賭場 運氣 機率 三顆骰子 骰盅 Sic Bo Dice 派對 手氣" style="--accent:#1f6b47;--soft:#dcece3">
+          <a class="card-link" href="games/sic-bo/index.html">
+            <span class="card-blob"></span>
+            <span class="card-top">
+              <span class="card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <!-- 後面那顆骰子只畫「露出來的 L 形輪廓」而不是完整方框：
+                       圖示在首頁只有 30×30，若兩個方框整條交疊，重疊處會多出兩條線而糊成一團。 -->
+                  <path d="M9 9V4.5A2.5 2.5 0 0 1 11.5 2h8A2.5 2.5 0 0 1 22 4.5v8a2.5 2.5 0 0 1-2.5 2.5H15" stroke-linecap="round" stroke-linejoin="round"/>
+                  <!-- 後骰的兩點刻意只放在露出的上緣與右緣，被前骰蓋住的位置不畫點 -->
+                  <circle cx="12.5" cy="5.5" r="1.25" fill="currentColor" stroke="none"/>
+                  <circle cx="18.5" cy="11.5" r="1.25" fill="currentColor" stroke="none"/>
+                  <rect x="2" y="9" width="13" height="13" rx="2.5"/>
+                  <circle cx="5.5" cy="12.5" r="1.25" fill="currentColor" stroke="none"/>
+                  <circle cx="8.5" cy="15.5" r="1.25" fill="currentColor" stroke="none"/>
+                  <circle cx="11.5" cy="18.5" r="1.25" fill="currentColor" stroke="none"/>
+                </svg>
+              </span>
+              <span class="card-badge">賭一把</span>
+            </span>
+            <span class="card-content">
+              <h3>骰寶</h3>
+              <p>三顆骰子逐一開出，押大小、點數與圍骰，連勝還能翻倍挑戰。</p>
+              <span class="card-cta">押注開骰 →</span>
+            </span>
+          </a>
+        </article>
         <div class="empty-state" id="empty-state">
           <span class="face">◌</span>
           <strong>這裡暫時空空的</strong>
@@ -475,7 +482,7 @@
     </section>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <footer>© 2026 波波小遊戲 · v1.16.0</footer>
+  <footer>© 2026 波波小遊戲 · v1.16.1</footer>
   <template id="controls-template">
     <div class="card-controls">
       <span class="drag-handle" title="拖曳排序">
