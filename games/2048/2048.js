@@ -19,10 +19,13 @@ const DIR_NAMES = ['up', 'right', 'down', 'left'];
 const MODES = { CLASSIC: 'classic', BLITZ: 'blitz' };
 
 // 三種盤面尺寸的設定。key 是邊長（字串鍵），查表一律用 hasOwnProperty 避免原型污染。
+// milestone 是「真正目標之前的階段性目標」。
+// 4×4 合出 2048 需要看兩步以上的玩法，一般玩家的達標率是個位數；
+// 2048 是招牌數字不能改，所以在它之前給一個看得到、摸得著的里程碑。
 const SIZE_CONFIG = {
-  3: { size: 3, target: 128,  spawn4Rate: 0,    startTiles: 2, label: '3×3 口袋局', hint: '只會生成 2，零容錯' },
-  4: { size: 4, target: 2048, spawn4Rate: 0.10, startTiles: 2, label: '4×4 正統局', hint: '原汁原味的 2048' },
-  5: { size: 5, target: 4096, spawn4Rate: 0.20, startTiles: 2, label: '5×5 大局',   hint: '格子多、局也長' }
+  3: { size: 3, target: 128,  milestone: 64,   spawn4Rate: 0,    startTiles: 2, label: '3×3 口袋局', hint: '只會生成 2，零容錯' },
+  4: { size: 4, target: 2048, milestone: 1024, spawn4Rate: 0.10, startTiles: 2, label: '4×4 正統局', hint: '原汁原味的 2048' },
+  5: { size: 5, target: 4096, milestone: 2048, spawn4Rate: 0.20, startTiles: 2, label: '5×5 大局',   hint: '格子多、局也長' }
 };
 
 // 加時閃電模式：固定 4×4，合出高階磚與連鎖合併都會加時間。
@@ -1044,6 +1047,7 @@ class Game2048 {
       scoreEl: byId('score'),
       bestEl: byId('best'),
       targetEl: byId('target'),
+      goalLabel: byId('goal-label'),
       blitzBar: byId('blitz-bar'),
       blitzTime: byId('blitz-time'),
       blitzFill: byId('blitz-fill'),
@@ -1089,6 +1093,7 @@ class Game2048 {
       statPlays: byId('stat-plays'),
       statBest: byId('stat-best'),
       statMaxtile: byId('stat-maxtile'),
+      statMilestone: byId('stat-milestone'),
       statHits: byId('stat-hits'),
       statStreak: byId('stat-streak'),
       statFewest: byId('stat-fewest'),
@@ -1689,6 +1694,9 @@ class Game2048 {
     // 悔棋快照要在模型更新前拍（經典模式且還有次數時才拍）
     if (this.mode === MODES.CLASSIC && this.undosUsed < UNDO_LIMIT) this.pushUndo();
 
+    // 里程碑要比對「移動前 vs 移動後」的最大磚，所以必須在模型更新前先拍下來
+    const beforeMax = maxTile(this.grid);
+
     // ---- 模型：邏輯真相立刻更新（value 已經是加倍後的值）----
     this.grid = plan.next;
     this.score += plan.gained;
@@ -1726,6 +1734,7 @@ class Game2048 {
     this.pending = {
       merges: Array.isArray(plan.merges) ? plan.merges : [],
       spawn,
+      beforeMax,
       gained: plan.gained,
       mergeCount: plan.mergeCount,
       maxMerged: plan.maxMerged,
@@ -1787,7 +1796,8 @@ class Game2048 {
     this.showChain(pending.mergeCount, pending.bonusMs);
     this.refreshHud();
     this.saveGameState();
-    this.checkAchievements();
+    const celebrated = this.checkMilestone(pending.beforeMax);
+    this.checkAchievements(celebrated);
     this.checkGameOver();
   }
 
@@ -1933,13 +1943,38 @@ class Game2048 {
     return this.sizeConfig().target;
   }
 
+  currentMilestone() {
+    if (this.mode === MODES.BLITZ) return _appSizeCfg(BLITZ_CONFIG.size).milestone;
+    return this.sizeConfig().milestone;
+  }
+
+  // 里程碑是否已經達成。不存進存檔，直接從盤面推導 ——
+  // 與 won 旗標同一套做法，少一個欄位就少一條存檔驗證規則。
+  milestoneReached() {
+    return maxTile(this.grid) >= this.currentMilestone();
+  }
+
+  // HUD 目標欄要顯示的「下一個目標」：還沒過里程碑就先顯示里程碑。
+  currentGoal() {
+    const milestone = this.currentMilestone();
+    if (milestone > 0 && !this.milestoneReached()) {
+      return { value: milestone, isMilestone: true };
+    }
+    return { value: this.currentTarget(), isMilestone: false };
+  }
+
   refreshHud() {
     if (!this.el) return;
     _appSetText(this.el.scoreEl, String(this.score));
     // 沒用過悔棋時，分數超過紀錄就即時顯示成新的最佳
     const liveBest = (this.undosUsed === 0) ? Math.max(this.best, this.score) : this.best;
     _appSetText(this.el.bestEl, String(liveBest));
-    _appSetText(this.el.targetEl, String(this.currentTarget()));
+    const goal = this.currentGoal();
+    _appSetText(this.el.targetEl, String(goal.value));
+    _appSetText(this.el.goalLabel, goal.isMilestone ? '里程碑' : '目標');
+    _appSetAttr(this.el.targetEl, 'title', goal.isMilestone
+      ? `階段目標 ${goal.value}，最終目標 ${this.currentTarget()}`
+      : `本局目標 ${goal.value}`);
     _appSetAttr(this.el.titleBadge, 'title', `本局目標 ${this.currentTarget()}`);
     this.refreshUndoUi();
     this.refreshBlitzHud();
@@ -2176,6 +2211,29 @@ class Game2048 {
     );
   }
 
+  // 第一次合出里程碑磚：慶祝一下並記進戰績。
+  // 只在「本步之前還沒達成、本步之後達成了」時觸發，所以一局最多一次；
+  // 重整續玩時因為 milestoneReached() 是從盤面推導的，也不會重複觸發。
+  // 回傳「這一步剛達成的里程碑值」，沒達成回 0 ——
+  // 讓成就那邊知道同一個數字已經慶祝過了，不要再跳一則重複的訊息。
+  checkMilestone(beforeMax) {
+    if (this.mode !== MODES.CLASSIC) return 0;
+    const milestone = this.currentMilestone();
+    if (!(milestone > 0)) return 0;
+    if (beforeMax >= milestone) return 0;
+    if (maxTile(this.grid) < milestone) return 0;
+
+    const stats = this.loadStats();
+    const bucket = stats.classic[this.bucketKey()];
+    if (bucket) {
+      bucket.milestoneHits = (bucket.milestoneHits || 0) + 1;
+      this.saveStats(stats);
+    }
+    this.showToast(`🎯 里程碑達成：合出了 ${milestone}！下一站 ${this.currentTarget()}`);
+    this.fireConfetti();
+    return milestone;
+  }
+
   checkGameOver() {
     if (this.gameOver) return;
     const target = this.currentTarget();
@@ -2375,6 +2433,7 @@ class Game2048 {
       bestScore: 0,
       practiceBestScore: 0,
       bestTile: 0,
+      milestoneHits: 0,
       targetHits: 0,
       fewestMovesToTarget: 0,
       fastestMs: 0,
@@ -2518,7 +2577,7 @@ class Game2048 {
   }
 
   // 里程碑成就：第一次合出 512 / 1024 / 2048 / 4096 / 8192 各給一次
-  checkAchievements() {
+  checkAchievements(skipToastFor) {
     const best = maxTile(this.grid);
     if (!(best >= ACHIEVE_TILES[0])) return;
     const stats = this.loadStats();
@@ -2533,6 +2592,8 @@ class Game2048 {
     }
     if (added === null) return;
     this.saveStats(stats);
+    // 里程碑剛慶祝過同一個數字的話就不要再跳一則（同一件事跳兩則很吵）
+    if (added === skipToastFor) return;
     this.showToast(`🏅 新成就：合出了 ${added}！`);
   }
 
@@ -2565,6 +2626,7 @@ class Game2048 {
       ? String(bucket.bestScore)
       : (bucket.practiceBestScore > 0 ? `${bucket.practiceBestScore}（練習）` : '--'));
     _appSetText(this.el.statMaxtile, bucket.bestTile > 0 ? String(bucket.bestTile) : '--');
+    _appSetText(this.el.statMilestone, String(bucket.milestoneHits || 0));
     _appSetText(this.el.statHits, String(bucket.targetHits));
     _appSetText(this.el.statStreak, String(bucket.bestStreak));
     _appSetText(this.el.statFewest, bucket.fewestMovesToTarget > 0 ? `${bucket.fewestMovesToTarget} 步` : '--');

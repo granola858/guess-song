@@ -192,6 +192,7 @@ class LoopNetGame {
     this.isWon = false;
     this.lastPoweredCount = 0;
     this.lastPoweredBulbCount = 0;
+    this.confettiStop = null; // BoboConfetti.burst() 回傳的收尾函式
 
     // 音效管理器
     this.sound = new SoundManager();
@@ -234,31 +235,50 @@ class LoopNetGame {
   /* ------------------------------------------------------------------------
      主題與設定 (相容首頁 bobo-home-preferences-v2)
      ------------------------------------------------------------------------ */
-  setupTheme() {
-    let savedTheme = 'light';
+  /* 讀取本遊戲自己的舊偏好 key；沒有或值不合法時回 null */
+  readLocalTheme() {
     try {
-      const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-      if (prefs.theme && ['dark', 'light'].includes(prefs.theme)) {
-        savedTheme = prefs.theme;
-      } else if (localStorage.getItem('loopnet_theme')) {
-        savedTheme = localStorage.getItem('loopnet_theme');
-      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        savedTheme = 'dark';
-      }
+      const stored = localStorage.getItem('loopnet_theme');
+      if (stored === 'dark' || stored === 'light') return stored;
     } catch (_) {}
+    return null;
+  }
 
-    document.documentElement.setAttribute('data-theme', savedTheme);
+  setupTheme() {
+    // 共用主題模組必須可缺席：載入失敗時退回 loopnet_theme 與 prefers-color-scheme
+    const themeKit = (typeof BoboTheme !== 'undefined') ? BoboTheme : null;
+    const localTheme = this.readLocalTheme();
+    let savedTheme;
+
+    if (themeKit) {
+      if (themeKit.hasExplicitPreference() || !localTheme) {
+        // 首頁已存過主題、或本遊戲沒有舊偏好：交給共用模組決定並跟隨系統主題變化
+        savedTheme = themeKit.init();
+      } else {
+        // 只有舊版 loopnet_theme 的使用者：沿用它，不讓系統主題蓋掉
+        savedTheme = themeKit.apply(localTheme);
+      }
+    } else {
+      savedTheme = localTheme
+        || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+
     this.updateThemeIcon(savedTheme);
 
     this.dom.themeBtn.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
+      let next;
+      if (themeKit) {
+        // toggle() 會套用主題，並且「只改」bobo-home-preferences-v2 的 theme 欄位
+        next = themeKit.toggle();
+      } else {
+        const current = document.documentElement.getAttribute('data-theme');
+        next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+      }
+      // 保留本遊戲自己的偏好 key
       try {
         localStorage.setItem('loopnet_theme', next);
-        const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-        prefs.theme = next;
-        localStorage.setItem('bobo-home-preferences-v2', JSON.stringify(prefs));
       } catch (_) {}
       this.updateThemeIcon(next);
     });
@@ -506,6 +526,7 @@ class LoopNetGame {
      遊戲流程與狀態控制
      ------------------------------------------------------------------------ */
   startNewGame() {
+    this.stopConfetti();
     this.isWon = false;
     this.moves = 0;
     this.lastPoweredCount = 0;
@@ -1066,52 +1087,31 @@ class LoopNetGame {
     }, 600);
   }
 
+  /* 彩帶改走共用模組 BoboConfetti；模組缺席時安靜退場，遊戲照常能玩 */
   triggerConfetti() {
     const canvas = this.dom.confettiCanvas;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth || document.documentElement.clientWidth;
-    canvas.height = window.innerHeight || document.documentElement.clientHeight;
-
-    const particles = Array.from({ length: 45 }, () => ({
-      x: canvas.width / 2,
-      y: canvas.height / 2,
-      vx: (Math.random() - 0.5) * 14,
-      vy: (Math.random() - 0.8) * 12,
-      color: ['#F59E0B', '#FBBF24', '#10B981', '#38BDF8', '#818CF8'][Math.floor(Math.random() * 5)],
-      size: Math.random() * 6 + 4,
+    const confetti = (typeof BoboConfetti !== 'undefined') ? BoboConfetti : null;
+    if (!confetti) return;
+    // 參數完全比照本遊戲原本那份實作，接共用模組不改變既有的慶祝手感：
+    // 45 顆圓點從畫面中心爆開、帶重力落下並淡出，配電力色票（琥珀／翠綠／天藍／靛紫）
+    this.confettiStop = confetti.burst(canvas, {
+      colors: ['#F59E0B', '#FBBF24', '#10B981', '#38BDF8', '#818CF8'],
+      pieces: 45,
+      origin: 'center',
+      shape: 'circle',
+      spread: 14,
       gravity: 0.28,
-      alpha: 1
-    }));
+      fade: 0.022
+    });
+  }
 
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      let stillAlive = false;
-
-      particles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += p.gravity;
-        p.alpha -= 0.022;
-
-        if (p.alpha > 0) {
-          stillAlive = true;
-          ctx.globalAlpha = Math.max(0, p.alpha);
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      if (stillAlive) {
-        requestAnimationFrame(animate);
-      } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-
-    animate();
+  /* 開新局時收掉還在飛的彩帶（模組會 cancelAnimationFrame 並清空畫布） */
+  stopConfetti() {
+    if (typeof this.confettiStop === 'function') {
+      this.confettiStop();
+      this.confettiStop = null;
+    }
   }
 }
 

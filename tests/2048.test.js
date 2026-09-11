@@ -586,21 +586,34 @@ test('DIR / DIR_NAMES / MODES 的值與契約完全相同', () => {
   assert.equal(PREF_KEY, 'g2048_pref_v1');
 });
 
-test('SIZE_CONFIG 三檔的 size / target / spawn4Rate / startTiles / 文案與契約完全相同', () => {
+test('SIZE_CONFIG 三檔的 size / target / milestone / spawn4Rate / startTiles / 文案與契約完全相同', () => {
   assert.deepEqual(Object.keys(SIZE_CONFIG).sort(), ['3', '4', '5'],
     'SIZE_CONFIG 必須剛好有 3 / 4 / 5 三檔');
 
   assert.deepEqual(SIZE_CONFIG[3], {
-    size: 3, target: 128, spawn4Rate: 0, startTiles: 2,
+    size: 3, target: 128, milestone: 64, spawn4Rate: 0, startTiles: 2,
     label: '3×3 口袋局', hint: '只會生成 2，零容錯'
   });
   assert.deepEqual(SIZE_CONFIG[4], {
-    size: 4, target: 2048, spawn4Rate: 0.10, startTiles: 2,
+    size: 4, target: 2048, milestone: 1024, spawn4Rate: 0.10, startTiles: 2,
     label: '4×4 正統局', hint: '原汁原味的 2048'
   });
   assert.deepEqual(SIZE_CONFIG[5], {
-    size: 5, target: 4096, spawn4Rate: 0.20, startTiles: 2,
+    size: 5, target: 4096, milestone: 2048, spawn4Rate: 0.20, startTiles: 2,
     label: '5×5 大局', hint: '格子多、局也長'
+  });
+});
+
+test('每一檔的里程碑都必須小於目標，且兩者都是 2 的冪', () => {
+  [3, 4, 5].forEach(n => {
+    const cfg = SIZE_CONFIG[n];
+    assert.ok(cfg.milestone < cfg.target,
+      `${n}×${n} 的里程碑 ${cfg.milestone} 必須小於目標 ${cfg.target}`);
+    assert.ok(levelOf(cfg.milestone) > 0, `${n}×${n} 的里程碑必須是 2 的冪`);
+    assert.ok(levelOf(cfg.target) > 0, `${n}×${n} 的目標必須是 2 的冪`);
+    // 里程碑至少要是目標的 1/4，否則太容易、失去階段目標的意義
+    assert.ok(cfg.milestone * 4 >= cfg.target,
+      `${n}×${n} 的里程碑 ${cfg.milestone} 不該低於目標的 1/4`);
   });
 });
 
@@ -1898,6 +1911,100 @@ test('localStorage 全面拋錯時，存讀檔路徑都不得讓例外逸出', (
         if (typeof Game2048.prototype[name] === 'function') app[name]();
       });
     }, '壞 JSON 不得讓例外逸出（JSON.parse 必須也在 try 內）');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 里程碑（階段性目標）
+// ---------------------------------------------------------------------------
+
+test('currentGoal 在里程碑達成前後回傳不同的目標', () => {
+  withStubEnv(() => {
+    const app = makeApp({ mode: MODES.CLASSIC, size: 4 });
+
+    // 盤面最大磚 8，還沒到里程碑 1024
+    app.grid = gridFromValues(
+      valuesFromRows(['2 4 8 0', '0 0 0 0', '0 0 0 0', '0 0 0 0']), 1
+    ).grid;
+    assert.equal(app.milestoneReached(), false, '最大磚 8 不該算達成里程碑');
+    assert.deepEqual(app.currentGoal(), { value: 1024, isMilestone: true },
+      '未達里程碑時目標欄要顯示里程碑');
+
+    // 合出 1024 之後，目標換成真正的 2048
+    app.grid = gridFromValues(
+      valuesFromRows(['1024 4 8 0', '0 0 0 0', '0 0 0 0', '0 0 0 0']), 1
+    ).grid;
+    assert.equal(app.milestoneReached(), true);
+    assert.deepEqual(app.currentGoal(), { value: 2048, isMilestone: false },
+      '達成里程碑後目標欄要換成最終目標');
+
+    // 超過里程碑同樣算達成
+    app.grid = gridFromValues(
+      valuesFromRows(['2048 4 8 0', '0 0 0 0', '0 0 0 0', '0 0 0 0']), 1
+    ).grid;
+    assert.equal(app.milestoneReached(), true, '超過里程碑當然也算達成');
+  });
+});
+
+test('三種尺寸的 currentGoal 都對應到自己那一檔的里程碑', () => {
+  withStubEnv(() => {
+    [[3, 64, 128], [4, 1024, 2048], [5, 2048, 4096]].forEach(([size, milestone, target]) => {
+      const app = makeApp({ mode: MODES.CLASSIC, size });
+      app.grid = gridFromValues(valuesFromRows([new Array(size).fill('2').join(' ')]
+        .concat(new Array(size - 1).fill(new Array(size).fill('0').join(' ')))), 1).grid;
+      assert.deepEqual(app.currentGoal(), { value: milestone, isMilestone: true },
+        `${size}×${size} 未達里程碑時應顯示 ${milestone}`);
+      assert.equal(app.currentTarget(), target);
+    });
+  });
+});
+
+test('checkMilestone 只在「這一步剛好跨過里程碑」時記一次', () => {
+  withStubEnv(store => {
+    const toasts = [];
+    const app = makeApp({
+      mode: MODES.CLASSIC, size: 4,
+      showToast: (m) => toasts.push(m),
+      fireConfetti() {}
+    });
+    app.grid = gridFromValues(
+      valuesFromRows(['1024 4 8 0', '0 0 0 0', '0 0 0 0', '0 0 0 0']), 1
+    ).grid;
+
+    // 這一步之前最大磚是 512 → 跨過里程碑，要記一次
+    app.checkMilestone(512);
+    let bucket = JSON.parse(store.g2048_stats_v1).classic['4'];
+    assert.equal(bucket.milestoneHits, 1, '跨過里程碑要記一次');
+    assert.equal(toasts.length, 1, '要跳一次慶祝訊息');
+
+    // 這一步之前就已經是 1024 → 不能再記
+    app.checkMilestone(1024);
+    bucket = JSON.parse(store.g2048_stats_v1).classic['4'];
+    assert.equal(bucket.milestoneHits, 1, '已經達成過就不得重複記');
+    assert.equal(toasts.length, 1, '也不得重複慶祝');
+  });
+});
+
+test('閃電模式不記里程碑', () => {
+  withStubEnv(store => {
+    const app = makeApp({
+      mode: MODES.BLITZ, size: 4,
+      showToast() {}, fireConfetti() {}
+    });
+    app.grid = gridFromValues(
+      valuesFromRows(['1024 4 8 0', '0 0 0 0', '0 0 0 0', '0 0 0 0']), 1
+    ).grid;
+    app.checkMilestone(512);
+    assert.ok(!store.g2048_stats_v1 || !JSON.parse(store.g2048_stats_v1).classic['4'].milestoneHits,
+      '閃電模式不該寫入經典模式的里程碑次數');
+  });
+});
+
+test('emptyBucket 含 milestoneHits 且初值為 0', () => {
+  withStubEnv(() => {
+    const app = makeApp({});
+    const bucket = app.emptyBucket();
+    assert.equal(bucket.milestoneHits, 0, 'milestoneHits 初值必須是 0');
   });
 });
 

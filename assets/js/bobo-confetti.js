@@ -86,6 +86,10 @@ const BoboConfetti = (() => {
    * @param {number} [options.frames=110]   播放幾幀後自動收尾
    * @param {string[]} [options.colors]     顏色陣列
    * @param {number} [options.gravity=0]    每幀對 vy 的加速度（0 為等速下落）
+   * @param {string} [options.origin='top']  'top' 從畫面上方灑落｜'center' 從畫面中心爆開
+   * @param {string} [options.shape='square'] 'square' 旋轉方片｜'circle' 圓點
+   * @param {number} [options.fade=0]        每幀 alpha 衰減量，0 代表不淡出（純靠 frames 收尾）
+   * @param {number} [options.spread=6]      初速的水平散開幅度（origin: 'center' 時建議加大）
    * @returns {Function} stop()：可重複呼叫，會 cancelAnimationFrame 並清空 canvas
    */
   const burst = (canvas, options) => {
@@ -104,6 +108,10 @@ const BoboConfetti = (() => {
       const pieceCount = Math.max(1, Math.floor(positive(opts.pieces, DEFAULT_PIECES)));
       const totalFrames = Math.max(1, Math.floor(positive(opts.frames, DEFAULT_FRAMES)));
       const gravity = finite(opts.gravity, DEFAULT_GRAVITY);
+      const fromCenter = opts.origin === 'center';
+      const isCircle = opts.shape === 'circle';
+      const fade = Math.max(0, finite(opts.fade, 0));
+      const spread = positive(opts.spread, fromCenter ? 14 : 6);
       const colors = (Array.isArray(opts.colors) && opts.colors.length)
         ? opts.colors.slice()
         : DEFAULT_COLORS;
@@ -136,14 +144,17 @@ const BoboConfetti = (() => {
       const pieces = [];
       for (let i = 0; i < pieceCount; i++) {
         pieces.push({
-          x: Math.random() * size.w,
-          y: Math.random() * size.h * 0.4,
-          size: Math.random() * 8 + 4,
+          // 'center' 從畫面正中央往外爆；'top' 散佈在上方四成的區域往下飄
+          x: fromCenter ? size.w / 2 : Math.random() * size.w,
+          y: fromCenter ? size.h / 2 : Math.random() * size.h * 0.4,
+          size: Math.random() * (isCircle ? 6 : 8) + 4,
           color: colors[Math.floor(Math.random() * colors.length)],
-          vx: (Math.random() - 0.5) * 6,
-          vy: Math.random() * 4 + 2,
+          vx: (Math.random() - 0.5) * spread,
+          // 中心爆發要先往上衝再被重力拉回來，所以初速偏負
+          vy: fromCenter ? (Math.random() - 0.8) * spread * 0.85 : Math.random() * 4 + 2,
           rot: Math.random() * 360,
-          dRot: (Math.random() - 0.5) * 8
+          dRot: (Math.random() - 0.5) * 8,
+          alpha: 1
         });
       }
 
@@ -186,21 +197,39 @@ const BoboConfetti = (() => {
         if (stopped) return;
         try {
           ctx.clearRect(0, 0, size.w, size.h);
+          let alive = false;
           for (let i = 0; i < pieces.length; i++) {
             const p = pieces[i];
             p.vy += gravity;
             p.x += p.vx;
             p.y += p.vy;
             p.rot += p.dRot;
+            if (fade > 0) {
+              p.alpha -= fade;
+              if (p.alpha <= 0) continue;   // 淡光了就不畫，也不算還活著
+            }
+            alive = true;
             ctx.save();
+            ctx.globalAlpha = fade > 0 ? Math.max(0, Math.min(1, p.alpha)) : 1;
             ctx.translate(p.x, p.y);
-            ctx.rotate((p.rot * Math.PI) / 180);
             ctx.fillStyle = p.color;
-            ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            if (isCircle) {
+              // 圓點不旋轉（轉了也看不出來，省一次 rotate）
+              ctx.beginPath();
+              ctx.arc(0, 0, p.size, 0, Math.PI * 2);
+              ctx.fill();
+            } else {
+              ctx.rotate((p.rot * Math.PI) / 180);
+              ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            }
             ctx.restore();
           }
           frames++;
-          if (frames < totalFrames) {
+          // 有開淡出時，全部淡光就提早收尾（不必硬撐到 frames 上限）
+          if (fade > 0 && !alive) {
+            frameHandle = null;
+            stop();
+          } else if (frames < totalFrames) {
             frameHandle = win.requestAnimationFrame(step);
           } else {
             frameHandle = null;

@@ -5,6 +5,9 @@
 const STORAGE_KEY = 'make24_game_state';
 const BEST_STREAK_KEY = 'make24_best_streak';
 
+// 過關彩帶的調色盤（沿用本遊戲原本的六色，交由共用模組 BoboConfetti 播放）
+const CONFETTI_COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#8B5CF6'];
+
 const SUITS = [
   { symbol: '♠', type: 'suit-black', name: 'spade' },
   { symbol: '♥', type: 'suit-red', name: 'heart' },
@@ -408,38 +411,82 @@ class Make24Game {
   }
 
   /* ------------------------------------------------------------------------
-     主題切換邏輯 (與首頁 bobo-home-preferences-v2 相容)
+     主題切換邏輯
+     - 首頁偏好 (bobo-home-preferences-v2) 的讀寫一律交給共用模組 BoboTheme，
+       由它負責「只改 theme 欄位、不覆蓋 order / hidden」
+     - 本遊戲自己的 make24_theme 偏好鍵仍完整保留（相容舊版存檔）
+     - 共用模組可缺席：載入失敗時退回本地邏輯，遊戲照常能玩
      ------------------------------------------------------------------------ */
   setupTheme() {
-    let savedTheme = 'light';
-    try {
-      const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-      if (prefs.theme && ['dark', 'light'].includes(prefs.theme)) {
-        savedTheme = prefs.theme;
-      } else if (localStorage.getItem('make24_theme')) {
-        savedTheme = localStorage.getItem('make24_theme');
-      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        savedTheme = 'dark';
-      }
-    } catch (_) {}
+    const themeKit = (typeof BoboTheme !== 'undefined' && BoboTheme) ? BoboTheme : null;
+    const localTheme = this.readLocalTheme();
+    let savedTheme;
 
-    document.documentElement.setAttribute('data-theme', savedTheme);
+    if (themeKit) {
+      // 先套用首頁偏好，並掛上系統主題監聽（使用者沒明確選過時才跟隨系統）
+      savedTheme = themeKit.init();
+      if (!themeKit.hasExplicitPreference() && localTheme) {
+        // 首頁沒有明確偏好時，才輪到本遊戲自己的舊偏好鍵
+        savedTheme = themeKit.apply(localTheme);
+        // make24_theme 本身就是使用者明確選過的結果，因此不再跟隨系統變化
+        themeKit.destroy();
+      }
+    } else {
+      savedTheme = this.readThemeWithoutKit(localTheme);
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+
     this.updateThemeIcon(savedTheme);
 
     if (this.dom.themeBtn) {
       this.dom.themeBtn.addEventListener('click', () => {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', nextTheme);
-        try {
-          localStorage.setItem('make24_theme', nextTheme);
-          const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
-          prefs.theme = nextTheme;
-          localStorage.setItem('bobo-home-preferences-v2', JSON.stringify(prefs));
-        } catch (_) {}
+        const nextTheme = themeKit
+          ? themeKit.toggle()
+          : this.toggleThemeWithoutKit();
+        this.writeLocalTheme(nextTheme);
         this.updateThemeIcon(nextTheme);
       });
     }
+  }
+
+  // 讀取本遊戲專屬的主題偏好鍵，沒有或值非法時回傳 null
+  readLocalTheme() {
+    try {
+      const value = localStorage.getItem('make24_theme');
+      return ['dark', 'light'].includes(value) ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // 寫回本遊戲專屬的主題偏好鍵（首頁那包由 BoboTheme 負責）
+  writeLocalTheme(theme) {
+    try {
+      localStorage.setItem('make24_theme', theme);
+    } catch (_) {}
+  }
+
+  // BoboTheme 缺席時的退路：首頁偏好 → 本遊戲偏好 → 系統偏好
+  readThemeWithoutKit(localTheme) {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('bobo-home-preferences-v2') || '{}');
+      if (prefs && ['dark', 'light'].includes(prefs.theme)) return prefs.theme;
+    } catch (_) {}
+    if (localTheme) return localTheme;
+    try {
+      if (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches) {
+        return 'dark';
+      }
+    } catch (_) {}
+    return 'light';
+  }
+
+  // BoboTheme 缺席時的退路：只切換畫面，不去碰首頁那包偏好（避免覆蓋 order / hidden）
+  toggleThemeWithoutKit() {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    return next;
   }
 
   updateThemeIcon(theme) {
@@ -1463,53 +1510,24 @@ class Make24Game {
 
   /* ------------------------------------------------------------------------
      五彩紙屑粒子特效 (Confetti)
+     改由共用模組 BoboConfetti 負責；模組可缺席，缺席時安靜退場不影響遊戲。
      ------------------------------------------------------------------------ */
   triggerConfetti() {
+    const confetti = (typeof BoboConfetti !== 'undefined' && BoboConfetti) ? BoboConfetti : null;
+    if (!confetti) return;
     const canvas = this.dom.confettiCanvas;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth || document.documentElement.clientWidth;
-    canvas.height = window.innerHeight || document.documentElement.clientHeight;
-
-    const particles = Array.from({ length: 45 }, () => ({
-      x: canvas.width / 2,
-      y: canvas.height / 2,
-      vx: (Math.random() - 0.5) * 12,
-      vy: (Math.random() - 0.8) * 11,
-      color: ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#8B5CF6'][Math.floor(Math.random() * 6)],
-      size: Math.random() * 6 + 4,
+    // 參數完全比照本遊戲原本那份實作，接共用模組不改變既有的慶祝手感：
+    // 45 顆圓點從畫面中心爆開、帶重力落下並淡出
+    confetti.burst(canvas, {
+      colors: CONFETTI_COLORS,
+      pieces: 45,
+      origin: 'center',
+      shape: 'circle',
+      spread: 12,
       gravity: 0.25,
-      alpha: 1
-    }));
-
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      let stillAlive = false;
-
-      particles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += p.gravity;
-        p.alpha -= 0.018;
-
-        if (p.alpha > 0) {
-          stillAlive = true;
-          ctx.globalAlpha = Math.max(0, p.alpha);
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      if (stillAlive) {
-        requestAnimationFrame(animate);
-      } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-
-    animate();
+      fade: 0.022
+    });
   }
 }
 

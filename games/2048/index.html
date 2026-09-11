@@ -118,7 +118,7 @@
           <span class="score-value" id="best"></span>
         </div>
         <div class="score-box">
-          <span class="score-label">目標</span>
+          <span class="score-label" id="goal-label">目標</span>
           <span class="score-value" id="target"></span>
         </div>
       </div>
@@ -249,6 +249,10 @@
             <div class="stat-val" id="stat-maxtile">--</div>
           </div>
           <div class="stat-item">
+            <div class="stat-label">里程碑達成</div>
+            <div class="stat-val" id="stat-milestone">--</div>
+          </div>
+          <div class="stat-item">
             <div class="stat-label">達標次數</div>
             <div class="stat-val" id="stat-hits">--</div>
           </div>
@@ -287,11 +291,14 @@
 
         <h3>📐 三種盤面與各自的目標</h3>
         <ul>
-          <li><strong>3×3 口袋局</strong>：目標磚是 <strong>128</strong>。格子少、容錯低，而且<strong>只會生成 2</strong>，完全不會冒出 4 來救你。</li>
-          <li><strong>4×4 正統局</strong>：目標磚是 <strong>2048</strong>，原汁原味的經典規格，新磚有 <strong>10%</strong> 的機率是 4。</li>
-          <li><strong>5×5 大局</strong>：目標磚是 <strong>4096</strong>。格子多、局也長，新磚有 <strong>20%</strong> 的機率是 4。</li>
+          <li><strong>3×3 口袋局</strong>：里程碑 <strong>64</strong>、目標磚 <strong>128</strong>。格子少、容錯低，而且<strong>只會生成 2</strong>，完全不會冒出 4 來救你。</li>
+          <li><strong>4×4 正統局</strong>：里程碑 <strong>1024</strong>、目標磚 <strong>2048</strong>，原汁原味的經典規格，新磚有 <strong>10%</strong> 的機率是 4。</li>
+          <li><strong>5×5 大局</strong>：里程碑 <strong>2048</strong>、目標磚 <strong>4096</strong>。格子多、局也長，新磚有 <strong>20%</strong> 的機率是 4。</li>
         </ul>
         <p>三種盤面開局都先放<strong>兩顆</strong>磚，戰績也是<strong>各自分開</strong>統計的。</p>
+
+        <h3>🎯 先攻里程碑，再拚目標</h3>
+        <p>目標磚是一段不短的路，所以每種盤面都先給一個<strong>里程碑</strong>當階段性目標。HUD 上的那一欄會先顯示里程碑，合出來之後才換成真正的目標磚，戰績裡也會分開記錄達成次數。以 4×4 來說，合出 <strong>1024</strong> 就已經是相當紮實的一局了。</p>
 
         <h3>🚀 達標之後還能繼續挑戰</h3>
         <p>合出目標磚的瞬間，這局的<strong>達標紀錄就已經存檔了</strong>。你可以按結算視窗的「<strong>繼續挑戰 →</strong>」接著往上疊，就算之後塞死也<strong>不會取消</strong>剛才的達標成績，放心往 4096、8192 衝。</p>

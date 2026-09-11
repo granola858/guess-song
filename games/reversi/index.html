@@ -8,12 +8,9 @@
   <title>黑白棋 - 波波小遊戲</title>
   <meta name="description" content="經典 8×8 黑白棋（Reversi / Othello），內建三檔 Alpha-Beta AI 人機對弈與雙人同機對戰，支援悔棋、提示、翻面動畫與戰績統計，觸控操作順手。">
 
-  <!-- 字型引入 -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
-
-  <!-- 防止深色模式閃爍 -->
+  <!-- 防止深色模式閃爍：必須 inline 且排在所有 stylesheet 之前，外連的 script 來不及。
+       內容是 BoboTheme.ANTI_FLASH_SNIPPET 的逐字複製，全站唯一的複製來源在
+       ../../assets/js/bobo-theme.js，要改請改那裡再同步過來。 -->
   <script>
     (() => {
       try {
@@ -25,6 +22,11 @@
       } catch (_) {}
     })();
   </script>
+
+  <!-- 字型引入 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="reversi.css">
 </head>
@@ -324,7 +326,9 @@
     </div>
   </div>
 
-  <!-- 統計與遊戲模組 -->
+  <!-- 共用、統計與遊戲模組（載入順序固定，且一律不加 defer / async） -->
+  <script src="../../assets/js/bobo-confetti.js"></script>
+  <script src="../../assets/js/bobo-theme.js"></script>
   <script src="../../assets/js/stats.js"></script>
   <script src="reversi.js"></script>
   <script>

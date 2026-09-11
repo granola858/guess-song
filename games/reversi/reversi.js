@@ -1064,6 +1064,16 @@ function _appIsPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+// 全站共用模組是「可缺席」的：Node 單元測試與模組載入失敗的頁面都沒有這些全域，
+// 此時下面兩個取用函式一律回 null，遊戲照常能玩（只是沒彩帶、主題退回 prefers-color-scheme）。
+function _appThemeKit() {
+  return (typeof BoboTheme !== 'undefined' && BoboTheme) ? BoboTheme : null;
+}
+
+function _appConfettiKit() {
+  return (typeof BoboConfetti !== 'undefined' && BoboConfetti) ? BoboConfetti : null;
+}
+
 // 難度 id 白名單檢查：只認 DIFFICULTIES 的「自有屬性」。
 // 裸的 DIFFICULTIES[id] 會讓 'toString' / 'constructor' 這類原型鏈上的 key 通過驗證，
 // 被污染的存檔就會讓難度按鈕全暗、戰績寫到 Object.prototype 上而永遠不增加。
@@ -1286,7 +1296,6 @@ class ReversiApp {
     this.animTimer = null;
     this.hintTimer = null;
     this.resultTimer = null;
-    this.confettiFrame = null;
 
     this.cells = [];
     this.el = {};
@@ -1437,9 +1446,19 @@ class ReversiApp {
 
   // ------------------------------------------------------------------------
   // 主題（與首頁共用 bobo-home-preferences-v2）
+  //
+  // 有載到 BoboTheme 就整段交給它：偏好讀寫、meta theme-color、
+  // 以及「只改 theme 欄位、不覆蓋首頁的 order / hidden」這條規則都在模組裡。
+  // 模組缺席時走下面的退場路徑，行為與接模組前逐字相同。
   // ------------------------------------------------------------------------
   initTheme() {
     if (typeof document === 'undefined') return;
+    const themeKit = _appThemeKit();
+    if (themeKit) {
+      // init() 會套用目前偏好，並在使用者沒明確選過主題時跟隨系統的 prefers-color-scheme
+      this.updateThemeIcon(themeKit.init());
+      return;
+    }
     const home = _appReadJson(HOME_PREF_KEY, {});
     let theme = null;
     if (_appIsPlainObject(home) && (home.theme === 'dark' || home.theme === 'light')) {
@@ -1458,6 +1477,12 @@ class ReversiApp {
 
   applyTheme(theme) {
     if (typeof document === 'undefined') return;
+    const themeKit = _appThemeKit();
+    if (themeKit) {
+      // apply() 回傳實際套用的主題（傳入非法值時會回退成目前偏好）
+      this.updateThemeIcon(themeKit.apply(theme));
+      return;
+    }
     if (document.documentElement) document.documentElement.dataset.theme = theme;
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', theme === 'dark' ? '#0f172a' : '#f5f7fb');
@@ -1466,8 +1491,15 @@ class ReversiApp {
 
   toggleTheme() {
     if (typeof document === 'undefined') return;
+    const themeKit = _appThemeKit();
+    if (themeKit) {
+      // toggle() 內部是「先讀回整包 bobo-home-preferences-v2，再只改 theme 欄位」
+      this.updateThemeIcon(themeKit.toggle());
+      return;
+    }
     const next = (document.documentElement && document.documentElement.dataset.theme === 'dark') ? 'light' : 'dark';
     this.applyTheme(next);
+    // 先讀回整包再只改 theme，不可整包覆寫（會清掉首頁的卡片順序與隱藏設定）
     const home = _appReadJson(HOME_PREF_KEY, {});
     const merged = _appIsPlainObject(home) ? home : {};
     merged.theme = next;
@@ -2906,62 +2938,16 @@ class ReversiApp {
     }, 2400);
   }
 
+  // 彩帶整段交給共用模組 BoboConfetti：
+  // prefers-reduced-motion 守衛、rAF handle 管理（重複呼叫會先收掉上一輪）、
+  // 高 DPI 與視窗縮放都在模組裡，這裡只負責「要不要放」與放在哪張 canvas。
+  // 模組缺席時安靜退場，對局結算流程完全不受影響。
   triggerConfetti() {
-    if (!this.el || !this.el.confettiCanvas || typeof window === 'undefined') return;
-    if (this.prefersReducedMotion()) return;
-    const canvas = this.el.confettiCanvas;
-    if (typeof canvas.getContext !== 'function') return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const colors = ['#38bdf8', '#fbbf24', '#f43f5e', '#34d399', '#a855f7', '#f8fafc'];
-    const pieces = [];
-    for (let i = 0; i < 90; i++) {
-      pieces.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height * 0.4,
-        size: Math.random() * 8 + 4,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        vx: (Math.random() - 0.5) * 6,
-        vy: Math.random() * 4 + 2,
-        rot: Math.random() * 360,
-        dRot: (Math.random() - 0.5) * 8
-      });
-    }
-
-    // 上一輪彩帶還在跑就先收掉，避免兩個 rAF 迴圈同時畫同一張 canvas
-    if (this.confettiFrame && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(this.confettiFrame);
-      this.confettiFrame = null;
-    }
-
-    let frames = 0;
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < pieces.length; i++) {
-        const p = pieces[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.rot += p.dRot;
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate((p.rot * Math.PI) / 180);
-        ctx.fillStyle = p.color;
-        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
-        ctx.restore();
-      }
-      frames++;
-      if (frames < 110) {
-        this.confettiFrame = requestAnimationFrame(animate);
-      } else {
-        this.confettiFrame = null;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-    this.confettiFrame = requestAnimationFrame(animate);
+    if (!this.el || !this.el.confettiCanvas) return;
+    const confetti = _appConfettiKit();
+    if (!confetti) return;
+    // 數量 90、110 幀、六色都是模組預設值，與本遊戲原本的實作一致，不必另外傳參數
+    confetti.burst(this.el.confettiCanvas);
   }
 }
 
