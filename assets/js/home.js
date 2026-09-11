@@ -458,14 +458,53 @@
     });
   };
 
+  // ─── 捲動位置記憶 ────────────────────────────────────────────────────
+  // 從首頁點進遊戲、再按遊戲裡的「回首頁」是一次全新的導頁（不是上一頁），
+  // 瀏覽器不會幫忙還原捲動位置，玩家每次都被丟回最上面。
+  // 這裡自己把位置記在 sessionStorage（只活在這個分頁，關掉就沒了）。
+  const SCROLL_KEY = 'bobo-home-scroll';
+
+  const saveScroll = () => {
+    try {
+      sessionStorage.setItem(SCROLL_KEY, String(Math.round(scrollY)));
+    } catch (_) {}
+  };
+
+  const restoreScroll = () => {
+    let y = 0;
+    try {
+      y = Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
+    } catch (_) {}
+    if (!(y > 0)) return;
+    // html { scroll-behavior: smooth } 會讓還原變成一段可見的捲動動畫，
+    // 所以還原期間暫時關掉，跳完再還回去。
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    const jump = () => scrollTo(0, Math.min(y, Math.max(0, document.body.scrollHeight - innerHeight)));
+    jump();
+    // 字型與卡片動畫會讓版面在載入後再微調一次高度，下一幀補跳一次才會準
+    requestAnimationFrame(() => {
+      jump();
+      root.style.scrollBehavior = previous;
+    });
+  };
+
+  addEventListener('pagehide', saveScroll);
+  // pagehide 在部分行動瀏覽器切到背景時不會觸發，visibilitychange 補一道
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveScroll();
+  });
+
   applyOrder();
   theme(prefs.theme);
   render();
   initStats();
+  restoreScroll();
 
   // 當使用者點擊「回首頁」或從上一頁返回（bfcache）時，重新同步最新數據
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) {
+      // bfcache 會自己還原捲動位置，這裡不要再跳一次跟它打架
       initStats();
     }
   });
