@@ -29,8 +29,7 @@ jobs:
         with:
           node-version: 22
 
-      # 本專案根目錄零 dependencies，不需要 npm ci。
-      # （games/guess-song 是唯一有相依的子專案，但它的 dist/ 已提交進版控。）
+      # 全站零 dependencies，不需要 npm ci。
 
       - name: 單元測試
         run: npm test

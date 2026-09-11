@@ -5,7 +5,7 @@ description: 啟動、操作、截圖波波小遊戲（mini-games）這個純前
 
 # 跑波波小遊戲
 
-純靜態站，**沒有 build 步驟**：18 款遊戲各自一個 `games/<slug>/` 資料夾，配上根目錄的 `index.html` 首頁。
+純靜態站，**沒有 build 步驟**：17 款遊戲各自一個 `games/<slug>/` 資料夾，配上根目錄的 `index.html` 首頁。
 驅動方式是 `.claude/skills/run-mini-games/driver.mjs` —— 一支零依賴的 Chrome DevTools Protocol 驅動器，
 用你機器上現成的 Chrome 加上 Node 內建的 `WebSocket`，**不需要 playwright / puppeteer，也不需要 npm install**。
 
@@ -21,7 +21,7 @@ description: 啟動、操作、截圖波波小遊戲（mini-games）這個純前
   `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`，
   以及 Linux 的 `/usr/bin/google-chrome`。找不到就設 `CHROME_PATH` 環境變數。
 
-`npm install` 只裝 tailwind（給 guess-song 用），**跑遊戲完全用不到**。
+專案本身沒有執行期相依，`npm install` 不是跑遊戲的前置條件。
 
 ## 跑起來：agent 路徑
 
@@ -31,7 +31,7 @@ description: 啟動、操作、截圖波波小遊戲（mini-games）這個純前
 npm run smoke
 ```
 
-把首頁 + 全部 18 款遊戲逐一開起來，點盤面第一格、按四個方向鍵，檢查有沒有 console 錯誤、
+把首頁 + 全部 17 款遊戲逐一開起來，點盤面第一格、按四個方向鍵，檢查有沒有 console 錯誤、
 未捕捉例外、或本站資源 404，並把每一頁的截圖存到 `.claude/skills/run-mini-games/_shots/<slug>.png`。
 **任一款掛掉就 exit 1**，錯誤訊息會帶 `檔名:行號`。
 
@@ -41,7 +41,7 @@ npm run smoke
 ❌ lights-out       /games/lights-out/index.html   uncaught: Error: 崩潰
     at HTMLDivElement.<anonymous> (http://127.0.0.1:8977/games/lights-out/lights-out.js:118:126)
 
-18/19 通過
+17/18 通過
 ```
 
 只跑幾款、或不想存截圖（比較快）：
@@ -172,7 +172,7 @@ localStorage 讀寫有沒有包在 try/catch 裡。**不會開瀏覽器**，所�
 | pair | `#game-container` | `div.card` × 20 |
 | reversi | `#board` | `div.cell` × 64（**不要點 `.board-row`**，見 Gotchas） |
 | make24 | `#keypad-grid` | `button.btn-key` |
-| sic-bo | `.bet-row` | `button.bet-btn` |
+| sic-bo | `#bet-table` | `button.bet-cell` × 50（六組注格全在同一個容器內，事件委派） |
 | 1a2b / color-text / puzzle / slap | 無格狀盤面 | 按鈕與輸入框驅動，用 `probe` 查 |
 
 ## Gotchas
@@ -181,13 +181,11 @@ localStorage 讀寫有沒有包在 try/catch 裡。**不會開瀏覽器**，所�
 
 - **headless Chrome 的 `prefers-color-scheme` 預設是 dark**。不先下 `theme light`，
   截圖全部會是深色版，很容易誤判成「主題壞掉」。
-- **`games/guess-song/` 會 404**。它是唯一的 React/Vite 子專案，`games/guess-song/index.html`
-  是 Vite 的 dev 進入點（指向 `/src/main.jsx`，靜態伺服器找不到）。真正的入口是
-  **`games/guess-song/dist/index.html`**，首頁也是連到那裡，而且 `dist/` 有進版控
-  （子專案的 `.gitignore` 把 `dist` 那行註解掉了）。
-- **`sic-bo` 是刻意從首頁隱藏的**，不是漏接。`games/` 有 18 個資料夾，首頁只列 17 張卡。
-  smoke.mjs 除了讀首頁連結還會補掃 `games/` 目錄，所以照樣會測到它 —— 這是故意的，
-  隱藏的遊戲一樣不能壞掉。**不要「順手」把它加回首頁。**
+- **猜歌資料庫（`guess-song`）已下架**，整個資料夾連同首頁卡片一起移除。
+  它是全站唯一的 React/Vite 子專案，拿掉之後這裡全部都是原生靜態頁，
+  `npm install` 也不再是任何一款遊戲的前置條件。
+- **首頁 17 張卡、`games/` 17 個資料夾，兩邊數量一致**。
+  smoke.mjs 除了讀首頁連結還會補掃 `games/` 目錄，所以無論卡片在不在首頁都會測到。
 - **reversi 的 `.board-row` 是 `display: contents`**，`getBoundingClientRect()` 回 0×0。
   用座標點它會失敗（driver 會報「元素沒有尺寸」）。要點 `#board .cell`。
 - **2048 磚塊的 `textContent` 含皮膚 emoji**：進化皮膚下會讀到 `"🐟4"` 而不是 `"4"`。
