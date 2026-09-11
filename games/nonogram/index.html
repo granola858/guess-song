@@ -113,6 +113,7 @@
               <input id="seed-input" class="seed-input" type="text" spellcheck="false" autocomplete="off"
                 placeholder="例如 NGM-10-0123ABCD...">
               <button id="load-seed-btn" class="primary-btn menu-action-btn" type="button">載入 Seed</button>
+              <div class="menu-note">載入的 Seed 會自動判定難度，放進對應的難度分頁。</div>
               <div id="seed-feedback" class="menu-feedback"></div>
             </div>
           </div>
@@ -122,10 +123,24 @@
 
     <h1 class="h1">Nonogram</h1>
 
-    <div class="toggle-container" id="level-toggle">
-      <button class="mode-btn active" data-size="8">8x8</button>
-      <button class="mode-btn" data-size="10">10x10</button>
-      <button class="mode-btn" data-size="12">12x12</button>
+    <div class="control-stack">
+      <div class="control-group">
+        <div class="control-label">盤面大小</div>
+        <div class="toggle-container" id="level-toggle">
+          <button class="mode-btn active" type="button" data-size="8">8x8</button>
+          <button class="mode-btn" type="button" data-size="10">10x10</button>
+          <button class="mode-btn" type="button" data-size="12">12x12</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">難度</div>
+        <div class="toggle-container" id="difficulty-toggle">
+          <button class="mode-btn" type="button" data-difficulty="easy">簡單</button>
+          <button class="mode-btn active" type="button" data-difficulty="medium">中等</button>
+          <button class="mode-btn" type="button" data-difficulty="hard">困難</button>
+        </div>
+      </div>
     </div>
 
     <div class="action-msg-container">
@@ -206,6 +221,7 @@
   </div>
 
   <script src="../../assets/js/stats.js"></script>
+  <script src="nonogram-core.js"></script>
   <script src="nonogram.js"></script>
   <script>
     if (typeof Stats !== 'undefined') Stats.recordGamePlay('nonogram');
